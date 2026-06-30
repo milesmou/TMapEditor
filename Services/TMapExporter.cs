@@ -205,9 +205,8 @@ public static class TMapExporter
         var manifest = new TMapExportGridManifest(
             generatedAt,
             document.FilePath is null ? null : Path.GetFileName(document.FilePath),
-            "MapRoot",
-            $"{document.Name}/MapRoot",
             "grid",
+            document.Layers.Select(layer => layer.Name).ToList(),
             document.GridSize,
             rows,
             columns,

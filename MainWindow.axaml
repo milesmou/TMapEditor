@@ -165,9 +165,9 @@
 
             <Grid Grid.Column="4" Background="{StaticResource PanelBrush}">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="*" />
+                    <RowDefinition Height="3*" />
                     <RowDefinition Height="5" />
-                    <RowDefinition Height="260" MinHeight="150" />
+                    <RowDefinition Height="2*" MinHeight="150" />
                 </Grid.RowDefinitions>
                 <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" Background="{StaticResource PanelBrush}">
                     <StackPanel Margin="10" LostFocus="SelectionProperty_LostFocus"
@@ -246,8 +246,6 @@
                                    Foreground="#AEB5C0" Margin="2,6,2,0" />
                         <ListBox x:Name="ResourceList" SelectionMode="Single"
                                  Tag="{Binding #ResourcePreviewScaleSlider.Value}"
-                                 PointerPressed="ResourceList_PointerPressed"
-                                 PointerMoved="ResourceList_PointerMoved"
                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                  ScrollViewer.VerticalScrollBarVisibility="Auto">
                             <ListBox.ItemsPanel>

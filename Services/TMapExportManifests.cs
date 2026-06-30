@@ -32,9 +32,8 @@ internal sealed record TMapExportObjectManifest(
 internal sealed record TMapExportGridManifest(
     string GeneratedAt,
     string? TmapFile,
-    string SourceLayerPath,
-    string GridTargetPath,
     string ExportType,
+    List<string> Layers,
     double GridSize,
     int Rows,
     int Columns,

@@ -36,6 +36,14 @@ public partial class MainWindow : Window
     {
         _settings = EditorSettingsService.Load();
         InitializeComponent();
+        ResourceList.AddHandler(
+            PointerPressedEvent,
+            ResourceList_PointerPressed,
+            handledEventsToo: true);
+        ResourceList.AddHandler(
+            PointerMovedEvent,
+            ResourceList_PointerMoved,
+            handledEventsToo: true);
         ResourcePreviewScaleSlider.Value = Math.Clamp(_settings.ResourcePreviewScale, 50, 200);
         EditorCanvas.SelectedItemChanged += EditorCanvas_SelectedItemChanged;
         EditorCanvas.DocumentChanging += EditorCanvas_DocumentChanging;
@@ -616,7 +624,7 @@ public partial class MainWindow : Window
         EditorCanvas.DropTargetLayer = selection?.Name ?? "";
     }
 
-    private void ResourceList_PointerPressed(object sender, PointerPressedEventArgs e)
+    private void ResourceList_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
         _resourceDragStart = e.GetPosition(ResourceList);
         _resourceDragPress = null;
@@ -630,7 +638,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void ResourceList_PointerMoved(object sender, PointerEventArgs e)
+    private async void ResourceList_PointerMoved(object? sender, PointerEventArgs e)
     {
         if (_resourceDragPress is null ||
             !e.GetCurrentPoint(ResourceList).Properties.IsLeftButtonPressed ||
@@ -642,9 +650,17 @@ public partial class MainWindow : Window
             return;
         var data = new DataTransfer();
         data.Add(DataTransferItem.Create(TMapDragFormats.Resource, resource));
-        await DragDrop.DoDragDropAsync(_resourceDragPress, data, DragDropEffects.Copy);
+        var dragPress = _resourceDragPress;
         _resourceDragPress = null;
         _draggedResource = null;
+        try
+        {
+            await DragDrop.DoDragDropAsync(dragPress, data, DragDropEffects.Copy);
+        }
+        catch (Exception exception)
+        {
+            await ShowError("拖放资源失败", exception);
+        }
     }
 
     private void EntityList_SelectionChanged(object sender, SelectionChangedEventArgs e)
