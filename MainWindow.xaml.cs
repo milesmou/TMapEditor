@@ -24,6 +24,7 @@ public partial class MainWindow : Window
     private bool _dirty;
     private bool _synchronizingSelection;
     private bool _updatingSelectionProperties;
+    private bool _updatingViewOptions;
     private Point _resourceDragStart;
     private PointerPressedEventArgs? _resourceDragPress;
     private TMapResource? _draggedResource;
@@ -88,6 +89,7 @@ public partial class MainWindow : Window
         GridSizeText.Text = Format(document.GridSize);
         ChunkRowsText.Text = document.ChunkRows.ToString(CultureInfo.InvariantCulture);
         ChunkColumnsText.Text = document.ChunkColumns.ToString(CultureInfo.InvariantCulture);
+        RestoreViewOptions(document.ViewSettings);
         RefreshEntityList();
         UpdateSelectionProperties(null);
         ResetUndoState();
@@ -239,9 +241,13 @@ public partial class MainWindow : Window
             var result = await Task.Run(() =>
                 TMapExporter.Export(exportDocument, folderPath, gpuContext, false));
             var renderer = result.HardwareAccelerated ? "GPU" : "CPU 回退";
-            StatusText.Text = $"导出完成：{result.ChunkCount} chunks，{result.WalkableCount} 可行走格，{result.BlockedCount} 阻挡格，{renderer}";
+            StatusText.Text = $"导出完成：{result.ChunkCount} chunks，{result.WalkableCount} 可行走格，" +
+                              $"{result.BlockedCount} 阻挡格，{result.ObjectCount} 对象，" +
+                              $"{result.DynamicImageCount} 动态图片，{renderer}";
             await ShowMessage("TMap Editor",
-                $"地图导出完成。\n\nChunk：{result.ChunkCount}\n可行走格：{result.WalkableCount}\n阻挡格：{result.BlockedCount}\n对象：{result.ObjectCount}\n渲染：{renderer}",
+                $"地图导出完成。\n\nChunk：{result.ChunkCount}\n可行走格：{result.WalkableCount}\n" +
+                $"阻挡格：{result.BlockedCount}\n对象：{result.ObjectCount}\n" +
+                $"动态图片：{result.DynamicImageCount}\n渲染：{renderer}",
                 ["确定"]);
         }
         catch (Exception exception)
@@ -327,6 +333,8 @@ public partial class MainWindow : Window
                     sprite.AnchorX = ParseDouble(SpriteAnchorXText.Text, "Anchor X");
                     sprite.AnchorY = ParseDouble(SpriteAnchorYText.Text, "Anchor Y");
                     sprite.Order = int.Parse(SpriteOrderText.Text, CultureInfo.InvariantCulture);
+                    sprite.Z = int.Parse(SpriteZText.Text, CultureInfo.InvariantCulture);
+                    SpriteZPanel.IsVisible = selectedLayer?.Type == TMapLayerType.Object;
                     break;
                 case TMapObject mapObject:
                     CaptureUndoSnapshot();
@@ -339,6 +347,7 @@ public partial class MainWindow : Window
                     mapObject.DisplayColor = FormatDisplayColor(ObjectDisplayColorPicker.Color);
                     mapObject.X = ParseDouble(ObjectXText.Text, "X");
                     mapObject.Y = ParseDouble(ObjectYText.Text, "Y");
+                    mapObject.Z = int.Parse(ObjectZText.Text, CultureInfo.InvariantCulture);
                     break;
                 default:
                     return;
@@ -433,14 +442,35 @@ public partial class MainWindow : Window
             _ => null
         };
         if (tag is null || !Enum.TryParse<EditorTool>(tag, out var tool)) return;
+        if (tool == EditorTool.CellZBrush)
+        {
+            if (!int.TryParse(CellZText.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var z) || z == 0)
+            {
+                StatusText.Text = "格子 Z 必须是非零整数；Z=0 请使用“清除 Z”";
+                CellZText.Focus();
+                return;
+            }
+            EditorCanvas.CellZBrushValue = z;
+        }
         EditorCanvas.Tool = tool;
         ToolHintText.Text = tool switch
         {
             EditorTool.WalkBrush => "行进区域画刷：按住左键连续刷，按住右键框选刷格子，Esc 中断",
             EditorTool.BlockBrush => "阻挡区域画刷：按住左键连续刷，按住右键框选刷格子，Esc 中断",
             EditorTool.EraseBrush => "清除格子画刷：按住左键连续清除，按住右键框选清除，Esc 中断",
+            EditorTool.CellZBrush => $"格子 Z 画刷（Z={EditorCanvas.CellZBrushValue}）：按住左键连续刷，按住右键框选刷格子",
+            EditorTool.EraseCellZBrush => "清除格子 Z：按住左键连续清除，按住右键框选清除，Esc 中断",
             _ => "选择模式：左键移动，滚轮缩放，中键/空格拖动画布"
         };
+    }
+
+    private void CellZText_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (!int.TryParse(CellZText.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var z) || z == 0)
+            return;
+        EditorCanvas.CellZBrushValue = z;
+        if (EditorCanvas.Tool == EditorTool.CellZBrush)
+            ToolHintText.Text = $"格子 Z 画刷（Z={z}）：按住左键连续刷，按住右键框选刷格子";
     }
 
     private async void OptimizeBlockedRegions_Click(object sender, RoutedEventArgs e)
@@ -476,12 +506,43 @@ public partial class MainWindow : Window
 
     private void ViewOption_Changed(object sender, RoutedEventArgs e)
     {
-        if (!IsInitialized) return;
+        if (!IsInitialized || _updatingViewOptions) return;
+        CaptureUndoSnapshot();
+        _document.ViewSettings.ShowGrid = ShowGridCheck.IsChecked == true;
+        _document.ViewSettings.ShowChunks = ShowChunksCheck.IsChecked == true;
+        _document.ViewSettings.ShowWaypoints = ShowWaypointsCheck.IsChecked == true;
+        _document.ViewSettings.ShowCellZs = ShowCellZCheck.IsChecked == true;
+        _document.ViewSettings.SnapToGrid = SnapCheck.IsChecked == true;
         EditorCanvas.ShowGrid = ShowGridCheck.IsChecked == true;
         EditorCanvas.ShowChunks = ShowChunksCheck.IsChecked == true;
         EditorCanvas.ShowCells = ShowWaypointsCheck.IsChecked == true;
+        EditorCanvas.ShowCellZs = ShowCellZCheck.IsChecked == true;
         EditorCanvas.SnapToGrid = SnapCheck.IsChecked == true;
         EditorCanvas.InvalidateVisual();
+        SetDirty(true);
+    }
+
+    private void RestoreViewOptions(TMapViewSettings settings)
+    {
+        _updatingViewOptions = true;
+        try
+        {
+            ShowGridCheck.IsChecked = settings.ShowGrid;
+            ShowChunksCheck.IsChecked = settings.ShowChunks;
+            ShowWaypointsCheck.IsChecked = settings.ShowWaypoints;
+            ShowCellZCheck.IsChecked = settings.ShowCellZs;
+            SnapCheck.IsChecked = settings.SnapToGrid;
+            EditorCanvas.ShowGrid = settings.ShowGrid;
+            EditorCanvas.ShowChunks = settings.ShowChunks;
+            EditorCanvas.ShowCells = settings.ShowWaypoints;
+            EditorCanvas.ShowCellZs = settings.ShowCellZs;
+            EditorCanvas.SnapToGrid = settings.SnapToGrid;
+            EditorCanvas.InvalidateVisual();
+        }
+        finally
+        {
+            _updatingViewOptions = false;
+        }
     }
 
     private void LayerVisibility_Changed(object sender, RoutedEventArgs e)
@@ -500,7 +561,7 @@ public partial class MainWindow : Window
             if (layer.Type == TMapLayerType.Object)
             {
                 EditorCanvas.Tool = EditorTool.Select;
-                ToolHintText.Text = "对象层：单击空白处添加对象点，拖动已有对象点可移动";
+                ToolHintText.Text = "对象层：单击空白处添加对象点，也可从资源区拖入动态图片";
             }
             else if (EditorCanvas.Tool == EditorTool.Select)
             {
@@ -703,7 +764,7 @@ public partial class MainWindow : Window
         try
         {
             SpriteLayerCombo.ItemsSource = null;
-            SpriteLayerCombo.ItemsSource = _document.Layers.Where(layer => layer.Type == TMapLayerType.Image).ToList();
+            SpriteLayerCombo.ItemsSource = _document.Layers.ToList();
             SpriteLayerCombo.SelectedItem = EditorCanvas.SelectedItem is TMapSprite sprite
                 ? _document.Layers.FirstOrDefault(layer => layer.Name == sprite.Layer)
                 : null;
@@ -726,12 +787,17 @@ public partial class MainWindow : Window
         _resourceDragStart = e.GetPosition(ResourceList);
         _resourceDragPress = null;
         _draggedResource = null;
-        if (!e.GetCurrentPoint(ResourceList).Properties.IsLeftButtonPressed) return;
+        var properties = e.GetCurrentPoint(ResourceList).Properties;
         if ((e.Source as Control)?.FindAncestorOfType<ListBoxItem>() is { DataContext: TMapResource resource })
         {
+            ResourceList.SelectedItem = resource;
+            if (!properties.IsLeftButtonPressed) return;
             _resourceDragPress = e;
             _draggedResource = resource;
-            ResourceList.SelectedItem = resource;
+        }
+        else if (properties.IsRightButtonPressed)
+        {
+            ResourceList.SelectedItem = null;
         }
     }
 
@@ -813,9 +879,20 @@ public partial class MainWindow : Window
 
     private void EditorCanvas_HoveredCellChanged(object? sender, MapCellHoverEventArgs e)
     {
-        StatusText.Text = e.IsInsideMap
-            ? $"格子索引：[{e.Row},{e.Column}]"
-            : "就绪";
+        if (!e.IsInsideMap)
+        {
+            StatusText.Text = "就绪";
+            return;
+        }
+        var cell = _document.Cells.FirstOrDefault(item => item.Row == e.Row && item.Column == e.Column);
+        var z = _document.CellZs.FirstOrDefault(item => item.Row == e.Row && item.Column == e.Column)?.Z ?? 0;
+        var state = cell?.State switch
+        {
+            TMapCellState.Walk => "行进",
+            TMapCellState.Block => "阻挡",
+            _ => "未设置",
+        };
+        StatusText.Text = $"格子索引：[{e.Row},{e.Column}]，通行：{state}，Z：{z}";
     }
 
     private void UpdateSelectionProperties(object? item)
@@ -830,9 +907,10 @@ public partial class MainWindow : Window
             switch (item)
             {
                 case TMapSprite sprite:
-                    SelectionTypeText.Text = "图片元素";
+                    var spriteLayer = _document.Layers.FirstOrDefault(layer => layer.Name == sprite.Layer);
+                    SelectionTypeText.Text = spriteLayer?.Type == TMapLayerType.Object ? "对象层图片" : "图片元素";
                     ItemNameText.Text = sprite.Name;
-                    SpriteLayerCombo.SelectedItem = _document.Layers.FirstOrDefault(layer => layer.Name == sprite.Layer);
+                    SpriteLayerCombo.SelectedItem = spriteLayer;
                     SpriteImagePathText.Text = sprite.ImagePath;
                     SpriteXText.Text = Format(sprite.X);
                     SpriteYText.Text = Format(sprite.Y);
@@ -844,6 +922,8 @@ public partial class MainWindow : Window
                     SpriteAnchorXText.Text = Format(sprite.AnchorX);
                     SpriteAnchorYText.Text = Format(sprite.AnchorY);
                     SpriteOrderText.Text = sprite.Order.ToString(CultureInfo.InvariantCulture);
+                    SpriteZText.Text = sprite.Z.ToString(CultureInfo.InvariantCulture);
+                    SpriteZPanel.IsVisible = spriteLayer?.Type == TMapLayerType.Object;
                     break;
                 case TMapObject mapObject:
                     SelectionTypeText.Text = "地图对象";
@@ -853,6 +933,7 @@ public partial class MainWindow : Window
                     ObjectDisplayColorPicker.Color = ParseDisplayColor(mapObject.DisplayColor);
                     ObjectXText.Text = Format(mapObject.X);
                     ObjectYText.Text = Format(mapObject.Y);
+                    ObjectZText.Text = mapObject.Z.ToString(CultureInfo.InvariantCulture);
                     break;
                 default:
                     SelectionTypeText.Text = "未选择";
@@ -882,7 +963,9 @@ public partial class MainWindow : Window
     {
         if (LayerList.SelectedItem is not TMapLayer layer) return [];
         return layer.Type == TMapLayerType.Object
-            ? _document.Objects.Where(mapObject => mapObject.Layer == layer.Name).Cast<object>().ToList()
+            ? _document.Objects.Where(mapObject => mapObject.Layer == layer.Name).Cast<object>()
+                .Concat(_document.Sprites.Where(sprite => sprite.Layer == layer.Name))
+                .ToList()
             : _document.Sprites.Where(sprite => sprite.Layer == layer.Name).Cast<object>().ToList();
     }
 
@@ -893,6 +976,57 @@ public partial class MainWindow : Window
         ResourceList.ItemsSource = null;
         ResourceList.ItemsSource = _document.Resources;
         ResourceList.SelectedItem = selection;
+    }
+
+    private async void DeleteResource_Click(object sender, RoutedEventArgs e)
+    {
+        if (ResourceList.SelectedItem is not TMapResource resource) return;
+        var resourcePath = TMapFileService.ResolveImagePath(_document, resource.ImagePath);
+        var usageCount = _document.Sprites.Count(sprite =>
+            string.Equals(TMapFileService.ResolveImagePath(_document, sprite.ImagePath), resourcePath,
+                StringComparison.OrdinalIgnoreCase));
+        if (usageCount > 0)
+        {
+            await ShowMessage("删除资源", $"资源“{resource.Name}”正被 {usageCount} 个图片元素使用，请先删除这些元素。", ["确定"]);
+            return;
+        }
+
+        var sharedByResource = _document.Resources.Any(item => !ReferenceEquals(item, resource) &&
+            string.Equals(TMapFileService.ResolveImagePath(_document, item.ImagePath), resourcePath,
+                StringComparison.OrdinalIgnoreCase));
+        var resourcesDirectory = Path.Combine(_document.BaseDirectory, "Resources");
+        var deleteFile = !sharedByResource && IsPathWithinDirectory(resourcePath, resourcesDirectory);
+        var message = deleteFile
+            ? $"确定删除资源“{resource.Name}”吗？\n工程 Resources 目录中的图片文件也会被删除，此操作无法撤销。"
+            : $"确定从资源列表移除“{resource.Name}”吗？";
+        if (await ShowMessage("删除资源", message, ["是", "否"]) != "是") return;
+
+        var index = _document.Resources.IndexOf(resource);
+        _document.Resources.Remove(resource);
+        ResourceList.SelectedItem = null;
+        RefreshResourceList();
+        SetDirty(true);
+        if (!await SaveDocument(false))
+        {
+            _document.Resources.Insert(Math.Clamp(index, 0, _document.Resources.Count), resource);
+            RefreshResourceList();
+            SetDirty(true);
+            return;
+        }
+
+        if (deleteFile && File.Exists(resourcePath))
+        {
+            try
+            {
+                File.Delete(resourcePath);
+            }
+            catch (Exception exception)
+            {
+                await ShowError("资源已移除，但图片文件删除失败", exception);
+            }
+        }
+        ResetUndoState();
+        StatusText.Text = $"已删除资源：{resource.Name}";
     }
 
     private void Delete_Click(object sender, RoutedEventArgs e)
@@ -1158,6 +1292,14 @@ public partial class MainWindow : Window
             candidate = Path.Combine(directory, $"{name}_{index}{extension}");
             if (!File.Exists(candidate)) return candidate;
         }
+    }
+
+    private static bool IsPathWithinDirectory(string path, string directory)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var directoryPrefix = Path.GetFullPath(directory)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        return fullPath.StartsWith(directoryPrefix, StringComparison.OrdinalIgnoreCase);
     }
 
     private Bitmap LoadSpriteBitmap(TMapSprite sprite)

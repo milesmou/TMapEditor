@@ -22,10 +22,12 @@ public sealed class TMapDocument
     public double GridSize { get; set; } = 32;
     public int ChunkRows { get; set; } = 3;
     public int ChunkColumns { get; set; } = 6;
+    public TMapViewSettings ViewSettings { get; set; } = new();
     public List<TMapLayer> Layers { get; set; } = [];
     public List<TMapSprite> Sprites { get; set; } = [];
     public List<TMapResource> Resources { get; set; } = [];
     public List<TMapCell> Cells { get; set; } = [];
+    public List<TMapCellZ> CellZs { get; set; } = [];
     public List<TMapObject> Objects { get; set; } = [];
 
     [JsonIgnore]
@@ -35,6 +37,15 @@ public sealed class TMapDocument
     public string BaseDirectory => FilePath is null
         ? Environment.CurrentDirectory
         : Path.GetDirectoryName(FilePath) ?? Environment.CurrentDirectory;
+}
+
+public sealed class TMapViewSettings
+{
+    public bool ShowGrid { get; set; } = true;
+    public bool ShowChunks { get; set; }
+    public bool ShowWaypoints { get; set; } = true;
+    public bool ShowCellZs { get; set; } = true;
+    public bool SnapToGrid { get; set; }
 }
 
 public sealed class TMapResource : IDisplayItem
@@ -82,6 +93,7 @@ public sealed class TMapSprite : ILockableDisplayItem
     public double AnchorX { get; set; } = 0.5;
     public double AnchorY { get; set; } = 0.5;
     public int Order { get; set; }
+    public int Z { get; set; }
     public bool IsLocked { get; set; }
 
     [JsonIgnore]
@@ -104,6 +116,13 @@ public sealed class TMapCell
     public TMapCellState State { get; set; }
 }
 
+public sealed class TMapCellZ
+{
+    public int Row { get; set; }
+    public int Column { get; set; }
+    public int Z { get; set; }
+}
+
 public sealed class TMapObject : ILockableDisplayItem
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -112,6 +131,7 @@ public sealed class TMapObject : ILockableDisplayItem
     public string Args { get; set; } = "";
     public double X { get; set; }
     public double Y { get; set; }
+    public int Z { get; set; }
     public string DisplayColor { get; set; } = "#00BFFF";
     public bool IsLocked { get; set; }
 

@@ -11,13 +11,17 @@
 | `width` / `height` | number | 地图尺寸 |
 | `gridSize` | number | 行走网格边长 |
 | `chunkRows` / `chunkColumns` | number | 静态图切块数量 |
+| `viewSettings` | object | 工程视图设置 |
 | `layers` | array | 图片层和对象层 |
 | `resources` | array | 工程图片资源 |
 | `sprites` | array | 图片元素 |
 | `cells` | array | 稀疏保存的 Walk / Block 格子状态 |
+| `cellZs` | array | 稀疏保存的非零格子 Z |
 | `objects` | array | 地图对象点 |
 
 新建工程的 `layers` 默认为空。每个图层包含 `name`、`visible` 和 `type`；`type` 为 `Image` 或 `Object`。图层名称必须唯一，图片层名称会原样用于烘焙输出目录及 `Grid.json` 中的层级字段名。旧文件没有 `type` 时按图片层处理；旧对象没有 `layer` 时会自动迁移到一个对象层。
+
+`viewSettings` 保存编辑器中的 `showGrid`、`showChunks`、`showWaypoints`、`showCellZs` 和 `snapToGrid`，重新打开工程时恢复这些选项；它们不影响烘焙数据。
 
 ## 工程资源
 
@@ -50,11 +54,12 @@
   "scaleY": 1,
   "anchorX": 0.5,
   "anchorY": 0.5,
-  "order": 40
+  "order": 40,
+  "z": 0
 }
 ```
 
-`imagePath` 相对于 `.tmap` 所在目录。`rotation` 单位为角度；负缩放表示镜像。`order` 越大越晚绘制。
+`imagePath` 相对于 `.tmap` 所在目录。`rotation` 单位为角度；负缩放表示镜像。`order` 越大越晚绘制。图片元素可以归属图片层或对象层：图片层元素参与 Chunk 烘焙，对象层元素作为动态图片单独导出。对象层图片使用 `z` 控制绘制先后，数值越大越靠前；图片层忽略该字段。
 
 ## 格子与对象
 
@@ -68,7 +73,17 @@
 }
 ```
 
-对象通过 `layer` 保存所属对象层，同时保存名称、坐标与编辑器显示颜色 `displayColor`（`#RRGGBB` 或 `#AARRGGBB`）。导出时编辑器计算其 `row`、`col`、`chunkRow` 和 `chunkCol`，并按对象层名称归入 `ObjectLayers`；显示颜色不影响导出数据。
+格子 Z 与通行状态相互独立，只有非零值才会写入 `cellZs`。同一行列只允许一条记录；未记录的格子 Z 为 `0`：
+
+```json
+{
+  "row": 3,
+  "column": 8,
+  "z": 10
+}
+```
+
+对象通过 `layer` 保存所属对象层，同时保存名称、坐标、`z` 与编辑器显示颜色 `displayColor`（`#RRGGBB` 或 `#AARRGGBB`）。导出时编辑器计算其 `row`、`col`、`chunkRow` 和 `chunkCol`，并写入对应对象层的 `Objects`；显示颜色不影响导出数据。对象点和对象层图片都按 `z` 从小到大导出。对象层图片写入同层的 `Images`，每项包含元素名称、导出图片文件名及地图坐标。
 
 图片元素和对象元素可包含布尔字段 `isLocked`；该字段只控制编辑器中的画布选中行为，不影响烘焙结果。旧文件未包含此字段时按未锁定处理。
 
@@ -84,8 +99,9 @@
 - `Grid.json` 的 `Layers` 数组按工程顺序记录所有层级，每项包含 `Name` 与 `Type`；`Type` 为 `Image` 或 `Object`。
 - 地图宽高分别保存为 `MapWidth` 与 `MapHeight`。
 - 图片层不再生成独立 manifest 文件。所有图片层集中在 `Grid.json` 的 `ImageLayers` 对象中，层级名称为字段名、字段值为 Chunk 数组；Chunk PNG 直接输出到 `<层级名>/`。
-- 所有对象层集中在 `Grid.json` 的 `ObjectLayers` 对象中，层级名称为字段名、字段值为对象数组。图片层和对象层即使没有元素，也会保留空数组。
-- 路点数据独立写入 `GridPath.json`。`WalkableCells` 与 `BlockedCells` 两类都有内容时只导出数量较少的一类；数量相同时导出 `WalkableCells`。只有一类有内容时导出该类。
+- 所有对象层集中在 `Grid.json` 的 `ObjectLayers` 对象中。每个层级包含 `Objects` 和 `Images` 两个数组，即使没有对应元素也会保留空数组。
+- 对象层中的图片不会参与 Chunk 烘焙；其原图复制到 `<对象层名称>/images/` 并保留扩展名，`Images[].File` 保存不带扩展名的文件名。同一源图片在同一对象层只复制一次，重名文件会自动追加编号。
+- 路点数据独立写入 `GridPath.json`。`WalkableCells` 与 `BlockedCells` 两类都有内容时只导出数量较少的一类；数量相同时导出 `WalkableCells`。只有一类有内容时导出该类。非零格子 Z 独立写入 `ZCells`，每项格式为 `[Row, Col, Z]`，不受通行状态精简规则影响。
 - 导出文件只记录 `TmapFile`，不包含 Cocos Scene 引用。
 
 `Grid.json` 的关键结构如下：
@@ -104,11 +120,23 @@
     ]
   },
   "ObjectLayers": {
-    "Npc": [
-      { "Name": "Npc_1", "Row": 4, "Col": 8, "ChunkRow": 0, "ChunkCol": 0 }
-    ]
+    "Npc": {
+      "Objects": [
+        { "Name": "Npc_1", "Row": 4, "Col": 8, "ChunkRow": 0, "ChunkCol": 0, "Z": 5 }
+      ],
+      "Images": [
+        { "Name": "Tree_1", "File": "tree", "X": 1200, "Y": 860, "Z": 10 }
+      ]
+    }
   }
 }
 ```
 
-`GridPath.json` 保存网格尺寸、行列数、地图尺寸以及精简后的 `WalkableCells` 或 `BlockedCells`。
+`GridPath.json` 保存网格尺寸、行列数、地图尺寸、精简后的 `WalkableCells` 或 `BlockedCells`，以及非零 `ZCells`：
+
+```json
+{
+  "WalkableCells": [[3, 8]],
+  "ZCells": [[3, 8, 10], [3, 9, 10]]
+}
+```

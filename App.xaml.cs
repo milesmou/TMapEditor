@@ -46,6 +46,7 @@ public partial class App : Application
             Console.WriteLine(
                 $"导出完成: {result.ChunkCount} chunks, {result.WalkableCount} 可行走格, " +
                 $"{result.BlockedCount} 阻挡格, {result.ObjectCount} 对象, " +
+                $"{result.DynamicImageCount} 动态图片, " +
                 $"渲染: {(result.HardwareAccelerated ? "GPU" : "CPU")}");
             return 0;
         }

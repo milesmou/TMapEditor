@@ -13,7 +13,9 @@ public enum EditorTool
     Select,
     WalkBrush,
     BlockBrush,
-    EraseBrush
+    EraseBrush,
+    CellZBrush,
+    EraseCellZBrush
 }
 
 [Flags]
@@ -60,7 +62,7 @@ public sealed class MapCanvas : Control
     private int? _hoveredColumn;
     private (int Row, int Column)? _brushStartCell;
     private (int Row, int Column)? _brushEndCell;
-    private TMapCellState? _brushCellState;
+    private EditorTool _activeBrushTool;
     private bool _isContinuousBrushing;
     private bool _isRectangleBrushing;
     private bool _brushChanged;
@@ -133,7 +135,9 @@ public sealed class MapCanvas : Control
     public bool ShowGrid { get; set; } = true;
     public bool ShowChunks { get; set; }
     public bool ShowCells { get; set; } = true;
+    public bool ShowCellZs { get; set; } = true;
     public bool SnapToGrid { get; set; }
+    public int CellZBrushValue { get; set; } = 1;
     public string DropTargetLayer { get; set; } = "";
 
     public void FitToView()
@@ -188,7 +192,7 @@ public sealed class MapCanvas : Control
         if (!IsInsideMap(point) || bitmap is null) return null;
 
         point = Snap(point);
-        if (!Document.Layers.Any(item => item.Name == DropTargetLayer && item.Type == TMapLayerType.Image)) return null;
+        if (!Document.Layers.Any(item => item.Name == DropTargetLayer)) return null;
         NotifyDocumentChanging();
         var sprite = new TMapSprite
         {
@@ -214,6 +218,7 @@ public sealed class MapCanvas : Control
         DrawMapBackground(dc);
         DrawImageLayers(dc);
         if (ShowCells) DrawCells(dc);
+        if (ShowCellZs) DrawCellZs(dc);
         DrawObjectLayers(dc);
         DrawCellBrushPreview(dc);
         if (ShowGrid) DrawGrid(dc);
@@ -259,7 +264,7 @@ public sealed class MapCanvas : Control
             if (IsCellBrushTool())
             {
                 e.Pointer.Capture(this);
-                BeginRectangleCellBrush(ScreenToMap(_lastScreenPoint), GetCurrentBrushState());
+                BeginRectangleCellBrush(ScreenToMap(_lastScreenPoint));
                 e.Handled = true;
                 return;
             }
@@ -281,13 +286,11 @@ public sealed class MapCanvas : Control
         switch (Tool)
         {
             case EditorTool.WalkBrush:
-                BeginContinuousCellBrush(mapPoint, TMapCellState.Walk);
-                break;
             case EditorTool.BlockBrush:
-                BeginContinuousCellBrush(mapPoint, TMapCellState.Block);
-                break;
             case EditorTool.EraseBrush:
-                BeginContinuousCellBrush(mapPoint, null);
+            case EditorTool.CellZBrush:
+            case EditorTool.EraseCellZBrush:
+                BeginContinuousCellBrush(mapPoint);
                 break;
             default:
                 BeginSelectionOrDrag(mapPoint, _lastScreenPoint);
@@ -370,7 +373,7 @@ public sealed class MapCanvas : Control
     private void OnCanvasDragOver(object? sender, DragEventArgs e)
     {
         if (e.DataTransfer.Contains(TMapDragFormats.Resource) &&
-            Document.Layers.Any(layer => layer.Name == DropTargetLayer && layer.Type == TMapLayerType.Image) &&
+            Document.Layers.Any(layer => layer.Name == DropTargetLayer) &&
             IsInsideMap(ScreenToMap(e.GetPosition(this))))
         {
             e.DragEffects = DragDropEffects.Copy;
@@ -491,8 +494,15 @@ public sealed class MapCanvas : Control
     {
         foreach (var layer in Document.Layers
                      .Where(layer => layer.Visible && layer.Type == TMapLayerType.Object).Reverse())
-        foreach (var mapObject in Document.Objects.Where(mapObject => mapObject.Layer == layer.Name))
-            DrawObject(dc, mapObject);
+        {
+            foreach (var sprite in Document.Sprites.Where(sprite => sprite.Layer == layer.Name)
+                         .OrderBy(sprite => sprite.Z)
+                         .ThenBy(sprite => sprite.Order))
+                DrawSprite(dc, sprite);
+            foreach (var mapObject in Document.Objects.Where(mapObject => mapObject.Layer == layer.Name)
+                         .OrderBy(mapObject => mapObject.Z))
+                DrawObject(dc, mapObject);
+        }
     }
 
     private void DrawSprite(DrawingContext dc, TMapSprite sprite)
@@ -525,6 +535,23 @@ public sealed class MapCanvas : Control
         }
     }
 
+    private void DrawCellZs(DrawingContext dc)
+    {
+        foreach (var cell in Document.CellZs)
+        {
+            var rect = GetCellScreenRect(cell.Row, cell.Column);
+            var color = cell.Z > 0
+                ? Color.FromArgb(75, 30, 150, 255)
+                : Color.FromArgb(75, 180, 80, 230);
+            dc.DrawRectangle(new SolidColorBrush(color), new Pen(Brushes.DeepSkyBlue, 1), rect);
+            if (_zoom * Document.GridSize < 18) continue;
+            var text = CreateText(cell.Z.ToString(), Math.Clamp(_zoom * Document.GridSize * 0.4, 10, 18));
+            dc.DrawText(text, new Point(
+                rect.Center.X - text.Width / 2,
+                rect.Center.Y - text.Height / 2));
+        }
+    }
+
     private void DrawObject(DrawingContext dc, TMapObject mapObject)
     {
         var point = MapToScreen(new TMapPoint(mapObject.X, mapObject.Y));
@@ -550,11 +577,13 @@ public sealed class MapCanvas : Control
     {
         if (!_isRectangleBrushing || !_brushStartCell.HasValue || !_brushEndCell.HasValue) return;
         var points = GetBrushRectanglePoints(_brushStartCell.Value, _brushEndCell.Value);
-        var brush = _brushCellState switch
+        var brush = _activeBrushTool switch
         {
-            TMapCellState.Walk => Brushes.LimeGreen,
-            TMapCellState.Block => Brushes.OrangeRed,
-            _ => Brushes.WhiteSmoke
+            EditorTool.WalkBrush => Brushes.LimeGreen,
+            EditorTool.BlockBrush => Brushes.OrangeRed,
+            EditorTool.CellZBrush => Brushes.DeepSkyBlue,
+            EditorTool.EraseCellZBrush => Brushes.MediumPurple,
+            _ => Brushes.WhiteSmoke,
         };
         var pen = new Pen(brush, 3);
         dc.DrawGeometry(null, pen, CreatePolygonGeometry(points, true));
@@ -609,26 +638,26 @@ public sealed class MapCanvas : Control
         }
     }
 
-    private void BeginContinuousCellBrush(TMapPoint point, TMapCellState? state)
+    private void BeginContinuousCellBrush(TMapPoint point)
     {
         var cell = GetMapCell(point);
         if (!cell.HasValue) return;
         NotifyDocumentChanging();
         _brushStartCell = cell;
         _brushEndCell = cell;
-        _brushCellState = state;
+        _activeBrushTool = Tool;
         _isContinuousBrushing = true;
         _brushChanged |= ApplyCellBrush(cell.Value);
         InvalidateVisual();
     }
 
-    private void BeginRectangleCellBrush(TMapPoint point, TMapCellState? state)
+    private void BeginRectangleCellBrush(TMapPoint point)
     {
         var cell = GetMapCell(point);
         if (!cell.HasValue) return;
         _brushStartCell = cell;
         _brushEndCell = cell;
-        _brushCellState = state;
+        _activeBrushTool = Tool;
         _isRectangleBrushing = true;
         InvalidateVisual();
     }
@@ -684,17 +713,26 @@ public sealed class MapCanvas : Control
 
     private bool ApplyCellBrush((int Row, int Column) position)
     {
+        if (_activeBrushTool is EditorTool.CellZBrush or EditorTool.EraseCellZBrush)
+            return ApplyCellZBrush(position);
+
         var cell = Document.Cells.FirstOrDefault(candidate =>
             candidate.Row == position.Row && candidate.Column == position.Column);
-        if (_brushCellState.HasValue)
+        var state = _activeBrushTool switch
+        {
+            EditorTool.WalkBrush => TMapCellState.Walk,
+            EditorTool.BlockBrush => TMapCellState.Block,
+            _ => (TMapCellState?)null,
+        };
+        if (state.HasValue)
         {
             if (cell is not null)
             {
-                if (cell.State == _brushCellState.Value) return false;
-                cell.State = _brushCellState.Value;
+                if (cell.State == state.Value) return false;
+                cell.State = state.Value;
             }
             else Document.Cells.Add(new TMapCell
-                { Row = position.Row, Column = position.Column, State = _brushCellState.Value });
+                { Row = position.Row, Column = position.Column, State = state.Value });
             return true;
         }
         else if (cell is not null)
@@ -705,25 +743,39 @@ public sealed class MapCanvas : Control
         return false;
     }
 
+    private bool ApplyCellZBrush((int Row, int Column) position)
+    {
+        var cell = Document.CellZs.FirstOrDefault(candidate =>
+            candidate.Row == position.Row && candidate.Column == position.Column);
+        if (_activeBrushTool == EditorTool.CellZBrush && CellZBrushValue != 0)
+        {
+            if (cell is not null)
+            {
+                if (cell.Z == CellZBrushValue) return false;
+                cell.Z = CellZBrushValue;
+            }
+            else Document.CellZs.Add(new TMapCellZ
+                { Row = position.Row, Column = position.Column, Z = CellZBrushValue });
+            return true;
+        }
+        if (cell is null) return false;
+        Document.CellZs.Remove(cell);
+        return true;
+    }
+
     private void CancelCellBrush()
     {
         _brushStartCell = null;
         _brushEndCell = null;
-        _brushCellState = null;
+        _activeBrushTool = EditorTool.Select;
         _isContinuousBrushing = false;
         _isRectangleBrushing = false;
         _brushChanged = false;
     }
 
     private bool IsCellBrushTool() => Tool is
-        EditorTool.WalkBrush or EditorTool.BlockBrush or EditorTool.EraseBrush;
-
-    private TMapCellState? GetCurrentBrushState() => Tool switch
-    {
-        EditorTool.WalkBrush => TMapCellState.Walk,
-        EditorTool.BlockBrush => TMapCellState.Block,
-        _ => null
-    };
+        EditorTool.WalkBrush or EditorTool.BlockBrush or EditorTool.EraseBrush or
+        EditorTool.CellZBrush or EditorTool.EraseCellZBrush;
 
     private List<TMapPoint> GetBrushRectanglePoints(
         (int Row, int Column) start,
@@ -846,10 +898,18 @@ public sealed class MapCanvas : Control
         foreach (var layer in Document.Layers.Where(layer => layer.Visible && layer.Type == TMapLayerType.Object))
         {
             foreach (var mapObject in Document.Objects
-                         .Where(item => !item.IsLocked && item.Layer == layer.Name).Reverse())
+                         .Where(item => !item.IsLocked && item.Layer == layer.Name)
+                         .OrderByDescending(item => item.Z))
             {
                 var point = MapToScreen(new TMapPoint(mapObject.X, mapObject.Y));
                 if (Distance(point, screenPoint) <= 10) return mapObject;
+            }
+            foreach (var sprite in Document.Sprites
+                         .Where(sprite => !sprite.IsLocked && sprite.Layer == layer.Name)
+                         .OrderByDescending(sprite => sprite.Z)
+                         .ThenByDescending(sprite => sprite.Order))
+            {
+                if (HitTestSprite(mapPoint, sprite)) return sprite;
             }
         }
         foreach (var layer in Document.Layers.Where(layer => layer.Visible && layer.Type == TMapLayerType.Image))

@@ -9,6 +9,7 @@ public sealed record TMapExportResult(
     int WalkableCount,
     int BlockedCount,
     int ObjectCount,
+    int DynamicImageCount,
     bool HardwareAccelerated);
 
 public static class TMapExporter
@@ -33,6 +34,7 @@ public static class TMapExporter
         {
             context.PreloadImages();
             Directory.CreateDirectory(outputDirectory);
+            CleanupGeneratedObjectImages(outputDirectory);
             CleanupGeneratedLayerOutputs(document, outputDirectory);
             var generatedAt = DateTime.UtcNow.ToString("O");
             var chunkCount = 0;
@@ -44,13 +46,14 @@ public static class TMapExporter
                 imageLayers.Add(new KeyValuePair<string, List<TMapExportChunkManifest>>(layer.Name, chunks));
             }
 
-            var (walkableCount, blockedCount, objectCount) = ExportGrid(
+            var (walkableCount, blockedCount, objectCount, dynamicImageCount) = ExportGrid(
                 document, outputDirectory, generatedAt, imageLayers);
             return new TMapExportResult(
                 chunkCount,
                 walkableCount,
                 blockedCount,
                 objectCount,
+                dynamicImageCount,
                 context.HardwareAccelerated);
         }
         finally
@@ -153,7 +156,7 @@ public static class TMapExporter
             throw new InvalidOperationException($"无法写入 PNG：{outputPath}");
     }
 
-    private static (int WalkableCount, int BlockedCount, int ObjectCount) ExportGrid(
+    private static (int WalkableCount, int BlockedCount, int ObjectCount, int DynamicImageCount) ExportGrid(
         TMapDocument document,
         string outputDirectory,
         string generatedAt,
@@ -169,6 +172,8 @@ public static class TMapExporter
         var allBlockedCells = document.Cells.Where(cell => cell.State == TMapCellState.Block)
             .OrderBy(cell => cell.Row).ThenBy(cell => cell.Column)
             .Select(cell => new[] { cell.Row, cell.Column }).ToList();
+        var zCells = document.CellZs.OrderBy(cell => cell.Row).ThenBy(cell => cell.Column)
+            .Select(cell => new[] { cell.Row, cell.Column, cell.Z }).ToList();
         var (walkableCells, blockedCells) = SelectCellLayerToExport(allWalkableCells, allBlockedCells);
 
         var chunkWidth = document.Width / document.ChunkColumns;
@@ -186,9 +191,12 @@ public static class TMapExporter
                     column,
                     Math.Clamp((int)Math.Floor((mapObject.Y - originY) / chunkHeight), 0, document.ChunkRows - 1),
                     Math.Clamp((int)Math.Floor((mapObject.X - originX) / chunkWidth), 0, document.ChunkColumns - 1),
+                    mapObject.Z,
                     string.IsNullOrWhiteSpace(mapObject.Args) ? null : mapObject.Args.Trim());
-            }).OfType<TMapExportObjectManifest>().ToList();
-            return new KeyValuePair<string, List<TMapExportObjectManifest>>(layer.Name, objects);
+            }).OfType<TMapExportObjectManifest>().OrderBy(mapObject => mapObject.Z).ToList();
+            var images = ExportObjectLayerImages(document, layer, outputDirectory);
+            return new KeyValuePair<string, TMapExportObjectLayerManifest>(
+                layer.Name, new TMapExportObjectLayerManifest(objects, images));
         }).ToList();
 
         var manifest = new TMapExportGridManifest(
@@ -215,11 +223,59 @@ public static class TMapExporter
             document.Width,
             document.Height,
             walkableCells,
-            blockedCells);
+            blockedCells,
+            zCells.Count == 0 ? null : zCells);
         WriteGridManifest(Path.Combine(outputDirectory, "Grid.json"), manifest, imageLayers, objectLayers);
         WriteGridPathManifest(Path.Combine(outputDirectory, "GridPath.json"), pathManifest);
         return (walkableCells?.Count ?? 0, blockedCells?.Count ?? 0,
-            objectLayers.Sum(layer => layer.Value.Count));
+            objectLayers.Sum(layer => layer.Value.Objects.Count),
+            objectLayers.Sum(layer => layer.Value.Images.Count));
+    }
+
+    private static List<TMapExportObjectImageManifest> ExportObjectLayerImages(
+        TMapDocument document,
+        TMapLayer layer,
+        string outputDirectory)
+    {
+        var sprites = document.Sprites.Where(sprite => sprite.Layer == layer.Name)
+            .OrderBy(sprite => sprite.Z)
+            .ThenBy(sprite => sprite.Order)
+            .ToList();
+        if (sprites.Count == 0) return [];
+
+        var imagesDirectory = Path.Combine(outputDirectory, LayerNameValidator.Validate(layer.Name), "images");
+        Directory.CreateDirectory(imagesDirectory);
+        var sourceFileNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var usedFileNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var result = new List<TMapExportObjectImageManifest>(sprites.Count);
+
+        foreach (var sprite in sprites)
+        {
+            var sourcePath = TMapFileService.ResolveImagePath(document, sprite.ImagePath);
+            if (!sourceFileNames.TryGetValue(sourcePath, out var fileName))
+            {
+                fileName = GetUniqueImageFileName(Path.GetFileName(sourcePath), usedFileNames);
+                File.Copy(sourcePath, Path.Combine(imagesDirectory, fileName), true);
+                sourceFileNames[sourcePath] = fileName;
+            }
+            result.Add(new TMapExportObjectImageManifest(
+                sprite.Name, Path.GetFileNameWithoutExtension(fileName), sprite.X, sprite.Y, sprite.Z));
+        }
+        return result;
+    }
+
+    private static string GetUniqueImageFileName(string fileName, ISet<string> usedFileNames)
+    {
+        if (string.IsNullOrWhiteSpace(fileName)) fileName = "image.png";
+        var name = Path.GetFileNameWithoutExtension(fileName);
+        var extension = Path.GetExtension(fileName);
+        if (string.IsNullOrWhiteSpace(name)) name = "image";
+        if (usedFileNames.Add(name)) return name + extension;
+        for (var index = 2;; index++)
+        {
+            var candidate = $"{name}_{index}";
+            if (usedFileNames.Add(candidate)) return candidate + extension;
+        }
     }
 
     private static (List<int[]>? WalkableCells, List<int[]>? BlockedCells) SelectCellLayerToExport(
@@ -367,15 +423,19 @@ public static class TMapExporter
             cell.Row < 0 || cell.Row >= rows || cell.Column < 0 || cell.Column >= columns);
         if (invalidCell is not null)
             throw new InvalidDataException($"格子 [{invalidCell.Row},{invalidCell.Column}] 超出地图范围。");
+        var invalidZCell = document.CellZs.FirstOrDefault(cell =>
+            cell.Row < 0 || cell.Row >= rows || cell.Column < 0 || cell.Column >= columns);
+        if (invalidZCell is not null)
+            throw new InvalidDataException($"Z 格子 [{invalidZCell.Row},{invalidZCell.Column}] 超出地图范围。");
         var layerNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var layer in document.Layers)
         {
             var name = LayerNameValidator.Validate(layer.Name);
             if (!layerNames.Add(name)) throw new InvalidDataException($"存在重名图层：{name}。");
         }
-        var imageLayerNames = document.Layers.Where(layer => layer.Type == TMapLayerType.Image)
+        var layerNamesForSprites = document.Layers
             .Select(layer => layer.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var orphan = document.Sprites.FirstOrDefault(sprite => !imageLayerNames.Contains(sprite.Layer));
+        var orphan = document.Sprites.FirstOrDefault(sprite => !layerNamesForSprites.Contains(sprite.Layer));
         if (orphan is not null)
             throw new InvalidDataException($"图片元素“{orphan.Name}”引用了不存在的图层“{orphan.Layer}”。");
         var objectLayerNames = document.Layers.Where(layer => layer.Type == TMapLayerType.Object)
@@ -410,6 +470,54 @@ public static class TMapExporter
             var manifestPath = Path.Combine(layerDirectory, "manifest", layerName + ".json");
             if (IsGeneratedLayerManifest(manifestPath))
                 CleanupGeneratedLayer(layerDirectory, layerName);
+        }
+    }
+
+    private static void CleanupGeneratedObjectImages(string outputDirectory)
+    {
+        var gridPath = Path.Combine(outputDirectory, "Grid.json");
+        if (!File.Exists(gridPath)) return;
+        try
+        {
+            using var json = JsonDocument.Parse(File.ReadAllText(gridPath));
+            if (!json.RootElement.TryGetProperty("ObjectLayers", out var objectLayers) ||
+                objectLayers.ValueKind != JsonValueKind.Object)
+                return;
+            foreach (var layer in objectLayers.EnumerateObject())
+            {
+                if (Path.GetFileName(layer.Name) != layer.Name || layer.Value.ValueKind != JsonValueKind.Object ||
+                    !layer.Value.TryGetProperty("Images", out var images) || images.ValueKind != JsonValueKind.Array)
+                    continue;
+                var imagesDirectory = Path.Combine(outputDirectory, layer.Name, "images");
+                foreach (var image in images.EnumerateArray())
+                {
+                    if (image.ValueKind != JsonValueKind.Object) continue;
+                    if (image.TryGetProperty("File", out var fileProperty))
+                    {
+                        var file = fileProperty.GetString();
+                        if (string.IsNullOrWhiteSpace(file) || Path.GetFileName(file) != file ||
+                            Path.HasExtension(file) || !Directory.Exists(imagesDirectory))
+                            continue;
+                        foreach (var path in Directory.EnumerateFiles(imagesDirectory)
+                                     .Where(path => string.Equals(Path.GetFileNameWithoutExtension(path), file,
+                                         StringComparison.OrdinalIgnoreCase)))
+                            File.Delete(path);
+                    }
+                    else if (image.TryGetProperty("Image", out var imageProperty))
+                    {
+                        var imageName = imageProperty.GetString();
+                        if (string.IsNullOrWhiteSpace(imageName) || Path.GetFileName(imageName) != imageName) continue;
+                        var path = Path.Combine(imagesDirectory, imageName);
+                        if (File.Exists(path)) File.Delete(path);
+                    }
+                }
+                DeleteDirectoryIfEmpty(imagesDirectory);
+                DeleteDirectoryIfEmpty(Path.Combine(outputDirectory, layer.Name));
+            }
+        }
+        catch (JsonException)
+        {
+            // 非本工具生成或已损坏的 Grid 文件不参与清理。
         }
     }
 
@@ -499,7 +607,7 @@ public static class TMapExporter
         string path,
         TMapExportGridManifest value,
         IReadOnlyList<KeyValuePair<string, List<TMapExportChunkManifest>>> imageLayers,
-        IReadOnlyList<KeyValuePair<string, List<TMapExportObjectManifest>>> objectLayers)
+        IReadOnlyList<KeyValuePair<string, TMapExportObjectLayerManifest>> objectLayers)
     {
         using var buffer = new MemoryStream();
         using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { Indented = true }))
@@ -531,7 +639,7 @@ public static class TMapExporter
             foreach (var (layerName, objects) in objectLayers)
             {
                 writer.WritePropertyName(layerName);
-                JsonSerializer.Serialize(writer, objects, TMapJsonContext.Default.ListTMapExportObjectManifest);
+                JsonSerializer.Serialize(writer, objects, TMapJsonContext.Default.TMapExportObjectLayerManifest);
             }
             writer.WriteEndObject();
             writer.WriteEndObject();

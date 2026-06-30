@@ -46,8 +46,16 @@
                           IsCheckedChanged="ViewOption_Changed" />
                 <CheckBox x:Name="ShowWaypointsCheck" Content="路点" IsChecked="True" Margin="6,0"
                           IsCheckedChanged="ViewOption_Changed" />
+                <CheckBox x:Name="ShowCellZCheck" Content="格子 Z" IsChecked="True" Margin="6,0"
+                          IsCheckedChanged="ViewOption_Changed" />
                 <CheckBox x:Name="SnapCheck" Content="吸附网格" Margin="6,0"
                           IsCheckedChanged="ViewOption_Changed" />
+                <Border Width="1" Background="#4A4F57" Margin="6,0" />
+                <Button Content="刷 Z" Tag="CellZBrush" Click="Tool_Click" />
+                <TextBlock Text="Z" Margin="6,0,3,0" VerticalAlignment="Center" />
+                <TextBox x:Name="CellZText" Text="1" Width="55" VerticalContentAlignment="Center"
+                         TextChanged="CellZText_TextChanged" />
+                <Button Content="清除 Z" Tag="EraseCellZBrush" Click="Tool_Click" Margin="4,0" />
                 <Border Width="1" Background="#4A4F57" Margin="6,0" />
                 <Button Content="适应窗口" Click="Fit_Click" />
                 <TextBlock x:Name="ToolHintText" Text="选择模式：左键移动，滚轮缩放，中键/空格拖动画布" Margin="12,0" VerticalAlignment="Center" />
@@ -212,6 +220,9 @@
                         <UniformGrid Columns="2">
                             <StackPanel><TextBlock Text="X" /><TextBox x:Name="SpriteXText" /></StackPanel>
                             <StackPanel><TextBlock Text="Y" /><TextBox x:Name="SpriteYText" /></StackPanel>
+                            <StackPanel x:Name="SpriteZPanel" IsVisible="False">
+                                <TextBlock Text="Z" /><TextBox x:Name="SpriteZText" />
+                            </StackPanel>
                             <StackPanel><TextBlock Text="宽度" /><TextBox x:Name="SpriteWidthText" /></StackPanel>
                             <StackPanel><TextBlock Text="高度" /><TextBox x:Name="SpriteHeightText" /></StackPanel>
                             <StackPanel><TextBlock Text="旋转°" /><TextBox x:Name="SpriteRotationText" /></StackPanel>
@@ -243,6 +254,7 @@
                         <UniformGrid Columns="2">
                             <StackPanel><TextBlock Text="X" /><TextBox x:Name="ObjectXText" /></StackPanel>
                             <StackPanel><TextBlock Text="Y" /><TextBox x:Name="ObjectYText" /></StackPanel>
+                            <StackPanel><TextBlock Text="Z" /><TextBox x:Name="ObjectZText" /></StackPanel>
                         </UniformGrid>
                     </StackPanel>
 
@@ -303,6 +315,11 @@
                                     </Border>
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
+                            <ListBox.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="删除资源" Click="DeleteResource_Click" />
+                                </ContextMenu>
+                            </ListBox.ContextMenu>
                         </ListBox>
                     </DockPanel>
                 </Border>

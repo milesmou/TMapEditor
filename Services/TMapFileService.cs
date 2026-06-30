@@ -65,12 +65,19 @@ public static class TMapFileService
     internal static void Normalize(TMapDocument document)
     {
         document.Layers ??= [];
+        document.ViewSettings ??= new TMapViewSettings();
         document.Sprites ??= [];
         document.Resources ??= [];
         document.Cells ??= [];
         document.Cells = document.Cells
             .GroupBy(cell => (cell.Row, cell.Column))
             .Select(group => group.Last())
+            .ToList();
+        document.CellZs ??= [];
+        document.CellZs = document.CellZs
+            .GroupBy(cell => (cell.Row, cell.Column))
+            .Select(group => group.Last())
+            .Where(cell => cell.Z != 0)
             .ToList();
         document.Objects ??= [];
         foreach (var mapObject in document.Objects.Where(mapObject => string.IsNullOrWhiteSpace(mapObject.DisplayColor)))
