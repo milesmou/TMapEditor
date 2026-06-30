@@ -68,7 +68,7 @@
 }
 ```
 
-对象通过 `layer` 保存所属对象层，同时保存名称与坐标。导出时编辑器计算其 `row`、`col`、`chunkRow` 和 `chunkCol`，并保留对象层名称。
+对象通过 `layer` 保存所属对象层，同时保存名称与坐标。导出时编辑器计算其 `row`、`col`、`chunkRow` 和 `chunkCol`，并按对象层名称归入 `ObjectLayers`。
 
 图片元素和对象元素可包含布尔字段 `isLocked`；该字段只控制编辑器中的画布选中行为，不影响烘焙结果。旧文件未包含此字段时按未锁定处理。
 
@@ -77,34 +77,38 @@
 ## 导出规则
 
 - Chunk 原点为地图左下角，命名为 `chunk_row_col.png`。
-- 只有被图片覆盖的 Chunk 才写入 PNG，并记录到 `Grid.json` 对应图片层的 `chunks` 中。
+- 只有被图片覆盖的 Chunk 才写入 PNG，并记录到 `Grid.json` 的 `ImageLayers` 对应图片层数组中。
 - 导出前会校验所有图片引用；文件缺失或无法解码时终止导出，不写入新的导出结果。
 - 再次导出会清理本工具识别到的旧 Chunk，以及已经从工程删除的图层产物；输出目录中的其他文件不会被删除。
-- `Grid.json` 的 `layers` 数组按工程顺序记录所有层级，每项包含 `name` 与 `type`；`type` 为 `Image` 或 `Object`。
-- 图片层不再生成独立 manifest 文件。每个图片层的原 manifest 数据直接写入 `Grid.json` 根对象，字段名为层级名称；Chunk PNG 仍输出到 `<层级名>/sprite/`。
-- 对象条目保存在 `Grid.json` 的 `objects` 中，并通过 `layer` 记录所属对象层。
-- 路点数据独立写入 `GridPath.json`。`walkableCells` 与 `blockedCells` 两类都有内容时只导出数量较少的一类；数量相同时导出 `walkableCells`。只有一类有内容时导出该类。
-- 导出文件只记录 `tmapFile`，不包含 Cocos Scene 引用。
+- 所有导出 JSON 属性统一使用 Pascal Case 命名。
+- `Grid.json` 的 `Layers` 数组按工程顺序记录所有层级，每项包含 `Name` 与 `Type`；`Type` 为 `Image` 或 `Object`。
+- 地图宽高分别保存为 `MapWidth` 与 `MapHeight`。
+- 图片层不再生成独立 manifest 文件。所有图片层集中在 `Grid.json` 的 `ImageLayers` 对象中，层级名称为字段名、字段值为 Chunk 数组；Chunk PNG 直接输出到 `<层级名>/`。
+- 所有对象层集中在 `Grid.json` 的 `ObjectLayers` 对象中，层级名称为字段名、字段值为对象数组。图片层和对象层即使没有元素，也会保留空数组。
+- 路点数据独立写入 `GridPath.json`。`WalkableCells` 与 `BlockedCells` 两类都有内容时只导出数量较少的一类；数量相同时导出 `WalkableCells`。只有一类有内容时导出该类。
+- 导出文件只记录 `TmapFile`，不包含 Cocos Scene 引用。
 
 `Grid.json` 的关键结构如下：
 
 ```json
 {
-  "layers": [
-    { "name": "Ground", "type": "Image" },
-    { "name": "Npc", "type": "Object" }
+  "MapWidth": 4500,
+  "MapHeight": 4002,
+  "Layers": [
+    { "Name": "Ground", "Type": "Image" },
+    { "Name": "Npc", "Type": "Object" }
   ],
-  "objects": [],
-  "Ground": {
-    "chunkWidth": 750,
-    "chunkHeight": 1334,
-    "rows": 3,
-    "columns": 6,
-    "chunks": [
-      { "row": 0, "col": 0, "x": -2250, "y": -2001, "file": "chunk_0_0" }
+  "ImageLayers": {
+    "Ground": [
+      { "Row": 0, "Col": 0, "X": -2250, "Y": -2001, "File": "chunk_0_0" }
+    ]
+  },
+  "ObjectLayers": {
+    "Npc": [
+      { "Name": "Npc_1", "Row": 4, "Col": 8, "ChunkRow": 0, "ChunkCol": 0 }
     ]
   }
 }
 ```
 
-`GridPath.json` 保存网格尺寸、行列数、地图尺寸以及精简后的 `walkableCells` 或 `blockedCells`。
+`GridPath.json` 保存网格尺寸、行列数、地图尺寸以及精简后的 `WalkableCells` 或 `BlockedCells`。

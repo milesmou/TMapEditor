@@ -10,7 +10,8 @@ namespace TMapEditor.Services;
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(TMapDocument))]
 [JsonSerializable(typeof(EditorSettings))]
-[JsonSerializable(typeof(TMapExportLayerManifest))]
+[JsonSerializable(typeof(List<TMapExportChunkManifest>))]
+[JsonSerializable(typeof(List<TMapExportObjectManifest>))]
 [JsonSerializable(typeof(TMapExportGridManifest))]
 [JsonSerializable(typeof(TMapExportGridPathManifest))]
 internal sealed partial class TMapJsonContext : JsonSerializerContext;

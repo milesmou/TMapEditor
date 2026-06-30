@@ -1,65 +1,50 @@
 namespace TMapEditor.Services;
 
+using System.Text.Json.Serialization;
 using TMapEditor.Models;
 
 internal sealed record TMapExportChunkManifest(
-    int Row,
-    int Col,
-    double X,
-    double Y,
-    string File);
-
-internal sealed record TMapExportLayerManifest(
-    string GeneratedAt,
-    string? TmapFile,
-    string SourceLayerPath,
-    string BoundsLayerPath,
-    double ChunkWidth,
-    double ChunkHeight,
-    int Rows,
-    int Columns,
-    string OriginMode,
-    double SourceLayerWidth,
-    double SourceLayerHeight,
-    List<TMapExportChunkManifest> Chunks);
+    [property: JsonPropertyName("Row")] int Row,
+    [property: JsonPropertyName("Col")] int Col,
+    [property: JsonPropertyName("X")] double X,
+    [property: JsonPropertyName("Y")] double Y,
+    [property: JsonPropertyName("File")] string File);
 
 internal sealed record TMapExportObjectManifest(
-    string Name,
-    string Layer,
-    int Row,
-    int Col,
-    int ChunkRow,
-    int ChunkCol,
-    string? Args);
+    [property: JsonPropertyName("Name")] string Name,
+    [property: JsonPropertyName("Row")] int Row,
+    [property: JsonPropertyName("Col")] int Col,
+    [property: JsonPropertyName("ChunkRow")] int ChunkRow,
+    [property: JsonPropertyName("ChunkCol")] int ChunkCol,
+    [property: JsonPropertyName("Args")] string? Args);
 
 internal sealed record TMapExportLayerInfo(
-    string Name,
-    TMapLayerType Type);
+    [property: JsonPropertyName("Name")] string Name,
+    [property: JsonPropertyName("Type")] TMapLayerType Type);
 
 internal sealed record TMapExportGridManifest(
-    string GeneratedAt,
-    string? TmapFile,
-    string ExportType,
-    List<TMapExportLayerInfo> Layers,
-    double GridSize,
-    int Rows,
-    int Columns,
-    int ChunkRows,
-    int ChunkColumns,
-    string OriginMode,
-    double SourceLayerWidth,
-    double SourceLayerHeight,
-    List<TMapExportObjectManifest> Objects);
+    [property: JsonPropertyName("GeneratedAt")] string GeneratedAt,
+    [property: JsonPropertyName("TmapFile")] string? TmapFile,
+    [property: JsonPropertyName("ExportType")] string ExportType,
+    [property: JsonPropertyName("Layers")] List<TMapExportLayerInfo> Layers,
+    [property: JsonPropertyName("GridSize")] double GridSize,
+    [property: JsonPropertyName("Rows")] int Rows,
+    [property: JsonPropertyName("Columns")] int Columns,
+    [property: JsonPropertyName("ChunkRows")] int ChunkRows,
+    [property: JsonPropertyName("ChunkColumns")] int ChunkColumns,
+    [property: JsonPropertyName("OriginMode")] string OriginMode,
+    [property: JsonPropertyName("MapWidth")] double MapWidth,
+    [property: JsonPropertyName("MapHeight")] double MapHeight);
 
 internal sealed record TMapExportGridPathManifest(
-    string GeneratedAt,
-    string? TmapFile,
-    string ExportType,
-    double GridSize,
-    int Rows,
-    int Columns,
-    string OriginMode,
-    double SourceLayerWidth,
-    double SourceLayerHeight,
-    List<int[]>? WalkableCells,
-    List<int[]>? BlockedCells);
+    [property: JsonPropertyName("GeneratedAt")] string GeneratedAt,
+    [property: JsonPropertyName("TmapFile")] string? TmapFile,
+    [property: JsonPropertyName("ExportType")] string ExportType,
+    [property: JsonPropertyName("GridSize")] double GridSize,
+    [property: JsonPropertyName("Rows")] int Rows,
+    [property: JsonPropertyName("Columns")] int Columns,
+    [property: JsonPropertyName("OriginMode")] string OriginMode,
+    [property: JsonPropertyName("MapWidth")] double MapWidth,
+    [property: JsonPropertyName("MapHeight")] double MapHeight,
+    [property: JsonPropertyName("WalkableCells")] List<int[]>? WalkableCells,
+    [property: JsonPropertyName("BlockedCells")] List<int[]>? BlockedCells);
