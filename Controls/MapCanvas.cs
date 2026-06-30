@@ -13,8 +13,7 @@ public enum EditorTool
     Select,
     WalkBrush,
     BlockBrush,
-    EraseBrush,
-    Object
+    EraseBrush
 }
 
 [Flags]
@@ -134,7 +133,6 @@ public sealed class MapCanvas : Control
     public bool ShowGrid { get; set; } = true;
     public bool ShowChunks { get; set; }
     public bool ShowCells { get; set; } = true;
-    public bool ShowObjects { get; set; } = true;
     public bool SnapToGrid { get; set; }
     public string DropTargetLayer { get; set; } = "";
 
@@ -190,7 +188,7 @@ public sealed class MapCanvas : Control
         if (!IsInsideMap(point) || bitmap is null) return null;
 
         point = Snap(point);
-        if (!Document.Layers.Any(item => item.Name == DropTargetLayer)) return null;
+        if (!Document.Layers.Any(item => item.Name == DropTargetLayer && item.Type == TMapLayerType.Image)) return null;
         NotifyDocumentChanging();
         var sprite = new TMapSprite
         {
@@ -216,7 +214,7 @@ public sealed class MapCanvas : Control
         DrawMapBackground(dc);
         DrawSprites(dc);
         if (ShowCells) DrawCells(dc);
-        if (ShowObjects) DrawObjects(dc);
+        DrawObjects(dc);
         DrawCellBrushPreview(dc);
         if (ShowGrid) DrawGrid(dc);
         if (ShowChunks) DrawChunks(dc);
@@ -290,9 +288,6 @@ public sealed class MapCanvas : Control
                 break;
             case EditorTool.EraseBrush:
                 BeginContinuousCellBrush(mapPoint, null);
-                break;
-            case EditorTool.Object:
-                AddObject(mapPoint);
                 break;
             default:
                 BeginSelectionOrDrag(mapPoint, _lastScreenPoint);
@@ -375,7 +370,7 @@ public sealed class MapCanvas : Control
     private void OnCanvasDragOver(object? sender, DragEventArgs e)
     {
         if (e.DataTransfer.Contains(TMapDragFormats.Resource) &&
-            Document.Layers.Any(layer => layer.Name == DropTargetLayer) &&
+            Document.Layers.Any(layer => layer.Name == DropTargetLayer && layer.Type == TMapLayerType.Image) &&
             IsInsideMap(ScreenToMap(e.GetPosition(this))))
         {
             e.DragEffects = DragDropEffects.Copy;
@@ -483,7 +478,7 @@ public sealed class MapCanvas : Control
 
     private void DrawSprites(DrawingContext dc)
     {
-        var visibleLayers = Document.Layers.Where(layer => layer.Visible)
+        var visibleLayers = Document.Layers.Where(layer => layer.Visible && layer.Type == TMapLayerType.Image)
             .Select(layer => layer.Name).ToHashSet(StringComparer.Ordinal);
         foreach (var sprite in Document.Sprites.Where(s => visibleLayers.Contains(s.Layer)).OrderBy(s => s.Order))
         {
@@ -518,7 +513,9 @@ public sealed class MapCanvas : Control
 
     private void DrawObjects(DrawingContext dc)
     {
-        foreach (var mapObject in Document.Objects)
+        var visibleLayers = Document.Layers.Where(layer => layer.Visible && layer.Type == TMapLayerType.Object)
+            .Select(layer => layer.Name).ToHashSet(StringComparer.Ordinal);
+        foreach (var mapObject in Document.Objects.Where(mapObject => visibleLayers.Contains(mapObject.Layer)))
         {
             var point = MapToScreen(new TMapPoint(mapObject.X, mapObject.Y));
             var brush = _selectedItems.Contains(mapObject) ? Brushes.Yellow : Brushes.DeepSkyBlue;
@@ -743,11 +740,15 @@ public sealed class MapCanvas : Control
 
     private void AddObject(TMapPoint point)
     {
+        if (!IsInsideMap(point)) return;
+        if (!Document.Layers.Any(layer => layer.Name == DropTargetLayer && layer.Type == TMapLayerType.Object))
+            return;
         point = Snap(point);
         NotifyDocumentChanging();
         var mapObject = new TMapObject
         {
             Name = $"Object_{Document.Objects.Count + 1}",
+            Layer = DropTargetLayer,
             X = point.X,
             Y = point.Y
         };
@@ -760,6 +761,23 @@ public sealed class MapCanvas : Control
     private void BeginSelectionOrDrag(TMapPoint mapPoint, Point screenPoint)
     {
         var extendSelection = _lastKeyModifiers.HasFlag(KeyModifiers.Control);
+        if (Document.Layers.Any(layer => layer.Name == DropTargetLayer && layer.Type == TMapLayerType.Object))
+        {
+            var objectHit = HitTestObject(screenPoint, DropTargetLayer);
+            if (objectHit is null)
+            {
+                AddObject(mapPoint);
+                return;
+            }
+            if (extendSelection)
+            {
+                ToggleSelectedItem(objectHit);
+                return;
+            }
+            SelectedItem = objectHit;
+            BeginDrag(mapPoint, objectHit.X, objectHit.Y);
+            return;
+        }
         if (!extendSelection && SelectedItem is TMapSprite { IsLocked: false } selectedSprite)
         {
             var resizeHandle = HitTestResizeHandle(selectedSprite, screenPoint);
@@ -814,20 +832,32 @@ public sealed class MapCanvas : Control
 
     private object? HitTestItem(TMapPoint mapPoint, Point screenPoint)
     {
-        if (ShowObjects)
+        var visibleObjectLayers = Document.Layers
+            .Where(layer => layer.Visible && layer.Type == TMapLayerType.Object)
+            .Select(layer => layer.Name).ToHashSet(StringComparer.Ordinal);
+        foreach (var mapObject in Document.Objects
+                     .Where(item => !item.IsLocked && visibleObjectLayers.Contains(item.Layer)).Reverse())
         {
-            foreach (var mapObject in Document.Objects.Where(item => !item.IsLocked).Reverse())
-            {
-                var p = MapToScreen(new TMapPoint(mapObject.X, mapObject.Y));
-                if (Distance(p, screenPoint) <= 10) return mapObject;
-            }
+            var p = MapToScreen(new TMapPoint(mapObject.X, mapObject.Y));
+            if (Distance(p, screenPoint) <= 10) return mapObject;
         }
-        var visibleLayers = Document.Layers.Where(layer => layer.Visible)
+        var visibleLayers = Document.Layers.Where(layer => layer.Visible && layer.Type == TMapLayerType.Image)
             .Select(layer => layer.Name).ToHashSet(StringComparer.Ordinal);
         foreach (var sprite in Document.Sprites.Where(sprite => !sprite.IsLocked && visibleLayers.Contains(sprite.Layer))
                      .OrderByDescending(sprite => sprite.Order))
         {
             if (HitTestSprite(mapPoint, sprite)) return sprite;
+        }
+        return null;
+    }
+
+    private TMapObject? HitTestObject(Point screenPoint, string layerName)
+    {
+        foreach (var mapObject in Document.Objects
+                     .Where(item => !item.IsLocked && item.Layer == layerName).Reverse())
+        {
+            var point = MapToScreen(new TMapPoint(mapObject.X, mapObject.Y));
+            if (Distance(point, screenPoint) <= 10) return mapObject;
         }
         return null;
     }

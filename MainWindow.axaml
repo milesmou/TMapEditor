@@ -28,7 +28,6 @@
                 <MenuItem Header="行进区域画刷" Tag="WalkBrush" Click="Tool_Click" />
                 <MenuItem Header="阻挡区域画刷" Tag="BlockBrush" Click="Tool_Click" />
                 <MenuItem Header="清除格子画刷" Tag="EraseBrush" Click="Tool_Click" />
-                <MenuItem Header="添加对象点" Tag="Object" Click="Tool_Click" />
             </MenuItem>
             <MenuItem Header="视图(_V)">
                 <MenuItem Header="适应窗口" Click="Fit_Click" />
@@ -44,8 +43,6 @@
                 <CheckBox x:Name="ShowChunksCheck" Content="Chunk" IsChecked="False" Margin="6,0"
                           IsCheckedChanged="ViewOption_Changed" />
                 <CheckBox x:Name="ShowWaypointsCheck" Content="路点" IsChecked="True" Margin="6,0"
-                          IsCheckedChanged="ViewOption_Changed" />
-                <CheckBox x:Name="ShowObjectsCheck" Content="对象点" IsChecked="True" Margin="6,0"
                           IsCheckedChanged="ViewOption_Changed" />
                 <CheckBox x:Name="SnapCheck" Content="吸附网格" Margin="6,0"
                           IsCheckedChanged="ViewOption_Changed" />
@@ -71,23 +68,36 @@
                 <ColumnDefinition Width="290" />
             </Grid.ColumnDefinitions>
 
-            <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Background="{StaticResource PanelBrush}">
-                <StackPanel Margin="8">
-                    <TextBlock Text="地图设置" FontSize="16" FontWeight="SemiBold" Margin="4,6" />
-                    <UniformGrid Columns="2">
-                        <StackPanel><TextBlock Text="宽度" /><TextBox x:Name="MapWidthText" /></StackPanel>
-                        <StackPanel><TextBlock Text="高度" /><TextBox x:Name="MapHeightText" /></StackPanel>
-                        <StackPanel><TextBlock Text="网格尺寸" /><TextBox x:Name="GridSizeText" /></StackPanel>
-                        <StackPanel><TextBlock Text="Chunk 行" /><TextBox x:Name="ChunkRowsText" /></StackPanel>
-                        <StackPanel><TextBlock Text="Chunk 列" /><TextBox x:Name="ChunkColumnsText" /></StackPanel>
-                    </UniformGrid>
-                    <Button Content="应用地图设置" Click="ApplyDocument_Click" />
+            <Grid Grid.Column="0" Background="{StaticResource PanelBrush}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="2*" />
+                    <RowDefinition Height="5" />
+                    <RowDefinition Height="3*" />
+                    <RowDefinition Height="5" />
+                    <RowDefinition Height="5*" />
+                </Grid.RowDefinitions>
 
-                    <Separator Margin="0,10" />
-                    <DockPanel>
-                        <TextBlock Text="图层" FontSize="16" FontWeight="SemiBold" DockPanel.Dock="Left" />
-                    </DockPanel>
-                    <ListBox x:Name="LayerList" Height="96" SelectionChanged="LayerList_SelectionChanged">
+                <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="8">
+                        <TextBlock Text="地图设置" FontSize="16" FontWeight="SemiBold" Margin="4,6" />
+                        <UniformGrid Columns="2">
+                            <StackPanel><TextBlock Text="宽度" /><TextBox x:Name="MapWidthText" /></StackPanel>
+                            <StackPanel><TextBlock Text="高度" /><TextBox x:Name="MapHeightText" /></StackPanel>
+                            <StackPanel><TextBlock Text="网格尺寸" /><TextBox x:Name="GridSizeText" /></StackPanel>
+                            <StackPanel><TextBlock Text="Chunk 行" /><TextBox x:Name="ChunkRowsText" /></StackPanel>
+                            <StackPanel><TextBlock Text="Chunk 列" /><TextBox x:Name="ChunkColumnsText" /></StackPanel>
+                        </UniformGrid>
+                        <Button Content="应用地图设置" Click="ApplyDocument_Click" />
+                    </StackPanel>
+                </ScrollViewer>
+
+                <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch"
+                              Background="#444850" />
+
+                <Grid Grid.Row="2" Margin="8,0,8,4" RowDefinitions="Auto,Auto,*,Auto">
+                    <Separator Margin="0,0,0,6" />
+                    <TextBlock Grid.Row="1" Text="地图层级" FontSize="16" FontWeight="SemiBold" Margin="4,2,4,6" />
+                    <ListBox Grid.Row="2" x:Name="LayerList" SelectionChanged="LayerList_SelectionChanged">
                         <ListBox.Styles>
                             <Style Selector="ListBoxItem">
                                 <Setter Property="Padding" Value="8,4" />
@@ -102,31 +112,33 @@
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
                                     <CheckBox Grid.Column="0" IsChecked="{Binding Visible, Mode=TwoWay}"
                                               ToolTip.Tip="显示/隐藏图层"
                                               IsCheckedChanged="LayerVisibility_Changed" />
-                                    <TextBlock Grid.Column="1" Text="{Binding Name}" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="1" Text="{Binding TypeIcon}" Margin="0,0,6,0"
+                                               VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="2" Text="{Binding Name}" VerticalAlignment="Center" />
                                 </Grid>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
-                    <UniformGrid Columns="3">
+                    <UniformGrid Grid.Row="3" Columns="3">
                         <Button Content="新增" Click="AddLayer_Click" />
                         <Button Content="重命名" Click="RenameLayer_Click" />
                         <Button Content="删除" Click="DeleteLayer_Click" />
                     </UniformGrid>
-                    <Separator Margin="0,10" />
-                    <TextBlock Text="元素视图" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,4" />
-                    <UniformGrid Columns="2" Margin="0,0,0,4">
-                        <ToggleButton x:Name="MapElementsViewButton" Content="地图元素" Tag="Map"
-                                      IsChecked="True"
-                                      Click="EntityViewButton_Click" />
-                        <ToggleButton x:Name="ObjectElementsViewButton" Content="对象元素" Tag="Object"
-                                      Click="EntityViewButton_Click" />
-                    </UniformGrid>
-                    <ListBox x:Name="EntityList" Height="330" SelectionMode="Multiple"
+                </Grid>
+
+                <GridSplitter Grid.Row="3" Height="5" HorizontalAlignment="Stretch"
+                              Background="#444850" />
+
+                <Grid Grid.Row="4" Margin="8,0,8,8" RowDefinitions="Auto,Auto,*">
+                    <Separator Margin="0,0,0,6" />
+                    <TextBlock Grid.Row="1" Text="元素" FontSize="16" FontWeight="SemiBold" Margin="4,2,4,6" />
+                    <ListBox Grid.Row="2" x:Name="EntityList" SelectionMode="Multiple"
                              SelectionChanged="EntityList_SelectionChanged"
                              PointerPressed="EntityList_PointerPressed">
                         <ListBox.Styles>
@@ -154,8 +166,8 @@
                             </ContextMenu>
                         </ListBox.ContextMenu>
                     </ListBox>
-                </StackPanel>
-            </ScrollViewer>
+                </Grid>
+            </Grid>
 
             <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch" Background="#444850" />
             <Border Grid.Column="2" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
@@ -207,6 +219,14 @@
                     </StackPanel>
 
                     <StackPanel x:Name="ObjectPropertyPanel" IsVisible="False">
+                        <TextBlock Text="图层" />
+                        <ComboBox x:Name="ObjectLayerCombo" SelectionChanged="SelectionProperty_SelectionChanged">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate x:DataType="models:TMapLayer">
+                                    <TextBlock Text="{Binding Name}" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
                         <TextBlock Text="Args" />
                         <TextBox x:Name="ObjectArgsText" />
                         <UniformGrid Columns="2">

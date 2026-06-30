@@ -62,7 +62,7 @@ public static class TMapFileService
         if (!string.IsNullOrWhiteSpace(name)) document.Name = name;
     }
 
-    private static void Normalize(TMapDocument document)
+    internal static void Normalize(TMapDocument document)
     {
         document.Layers ??= [];
         document.Sprites ??= [];
@@ -73,6 +73,21 @@ public static class TMapFileService
             .Select(group => group.Last())
             .ToList();
         document.Objects ??= [];
+        if (document.Objects.Count > 0)
+        {
+            var objectLayer = document.Layers.FirstOrDefault(layer => layer.Type == TMapLayerType.Object);
+            if (objectLayer is null)
+            {
+                var name = "ObjectLayer";
+                for (var index = 2; document.Layers.Any(layer =>
+                         string.Equals(layer.Name, name, StringComparison.OrdinalIgnoreCase)); index++)
+                    name = $"ObjectLayer{index}";
+                objectLayer = new TMapLayer { Name = name, Type = TMapLayerType.Object };
+                document.Layers.Add(objectLayer);
+            }
+            foreach (var mapObject in document.Objects.Where(mapObject => string.IsNullOrWhiteSpace(mapObject.Layer)))
+                mapObject.Layer = objectLayer.Name;
+        }
         RefreshResourcePaths(document);
     }
 }

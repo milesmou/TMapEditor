@@ -1,5 +1,7 @@
 namespace TMapEditor.Services;
 
+using TMapEditor.Models;
+
 internal sealed record TMapExportChunkManifest(
     int Row,
     int Col,
@@ -23,17 +25,22 @@ internal sealed record TMapExportLayerManifest(
 
 internal sealed record TMapExportObjectManifest(
     string Name,
+    string Layer,
     int Row,
     int Col,
     int ChunkRow,
     int ChunkCol,
     string? Args);
 
+internal sealed record TMapExportLayerInfo(
+    string Name,
+    TMapLayerType Type);
+
 internal sealed record TMapExportGridManifest(
     string GeneratedAt,
     string? TmapFile,
     string ExportType,
-    List<string> Layers,
+    List<TMapExportLayerInfo> Layers,
     double GridSize,
     int Rows,
     int Columns,
@@ -42,6 +49,17 @@ internal sealed record TMapExportGridManifest(
     string OriginMode,
     double SourceLayerWidth,
     double SourceLayerHeight,
-    List<TMapExportObjectManifest> Objects,
+    List<TMapExportObjectManifest> Objects);
+
+internal sealed record TMapExportGridPathManifest(
+    string GeneratedAt,
+    string? TmapFile,
+    string ExportType,
+    double GridSize,
+    int Rows,
+    int Columns,
+    string OriginMode,
+    double SourceLayerWidth,
+    double SourceLayerHeight,
     List<int[]>? WalkableCells,
     List<int[]>? BlockedCells);

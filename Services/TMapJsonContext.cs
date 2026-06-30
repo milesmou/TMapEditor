@@ -12,4 +12,5 @@ namespace TMapEditor.Services;
 [JsonSerializable(typeof(EditorSettings))]
 [JsonSerializable(typeof(TMapExportLayerManifest))]
 [JsonSerializable(typeof(TMapExportGridManifest))]
+[JsonSerializable(typeof(TMapExportGridPathManifest))]
 internal sealed partial class TMapJsonContext : JsonSerializerContext;

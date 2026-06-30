@@ -36,13 +36,16 @@ public static class TMapExporter
             CleanupGeneratedLayerOutputs(document, outputDirectory);
             var generatedAt = DateTime.UtcNow.ToString("O");
             var chunkCount = 0;
-            foreach (var layer in document.Layers)
+            var layerManifests = new List<KeyValuePair<string, TMapExportLayerManifest>>();
+            foreach (var layer in document.Layers.Where(layer => layer.Type == TMapLayerType.Image))
             {
-                chunkCount += ExportLayer(context, layer, outputDirectory, generatedAt);
+                var layerManifest = ExportLayer(context, layer, outputDirectory, generatedAt);
+                chunkCount += layerManifest.Chunks.Count;
+                layerManifests.Add(new KeyValuePair<string, TMapExportLayerManifest>(layer.Name, layerManifest));
             }
 
             var (walkableCount, blockedCount, objectCount) = ExportGrid(
-                document, outputDirectory, generatedAt);
+                document, outputDirectory, generatedAt, layerManifests);
             return new TMapExportResult(
                 chunkCount,
                 walkableCount,
@@ -56,7 +59,7 @@ public static class TMapExporter
         }
     }
 
-    private static int ExportLayer(
+    private static TMapExportLayerManifest ExportLayer(
         ExportContext context,
         TMapLayer layer,
         string outputDirectory,
@@ -66,9 +69,7 @@ public static class TMapExporter
         var layerName = LayerNameValidator.Validate(layer.Name);
         var layerDirectory = Path.Combine(outputDirectory, layerName);
         var spriteDirectory = Path.Combine(layerDirectory, "sprite");
-        var manifestDirectory = Path.Combine(layerDirectory, "manifest");
         Directory.CreateDirectory(spriteDirectory);
-        Directory.CreateDirectory(manifestDirectory);
 
         var chunkWidth = document.Width / document.ChunkColumns;
         var chunkHeight = document.Height / document.ChunkRows;
@@ -104,7 +105,7 @@ public static class TMapExporter
         }
 
         var sourcePath = $"{document.Name}/MapRoot/{layer.Name}";
-        var manifest = new TMapExportLayerManifest(
+        return new TMapExportLayerManifest(
             generatedAt,
             document.FilePath is null ? null : Path.GetFileName(document.FilePath),
             sourcePath,
@@ -117,8 +118,6 @@ public static class TMapExporter
             document.Width,
             document.Height,
             chunks);
-        WriteLayerManifest(Path.Combine(manifestDirectory, layerName + ".json"), manifest);
-        return chunks.Count;
     }
 
     private static void RenderChunk(
@@ -172,7 +171,8 @@ public static class TMapExporter
     private static (int WalkableCount, int BlockedCount, int ObjectCount) ExportGrid(
         TMapDocument document,
         string outputDirectory,
-        string generatedAt)
+        string generatedAt,
+        IReadOnlyList<KeyValuePair<string, TMapExportLayerManifest>> layerManifests)
     {
         var originX = -document.Width / 2;
         var originY = -document.Height / 2;
@@ -195,6 +195,7 @@ public static class TMapExporter
             if (column < 0 || column >= columns || row < 0 || row >= rows) return null;
             return new TMapExportObjectManifest(
                 mapObject.Name,
+                mapObject.Layer,
                 row,
                 column,
                 Math.Clamp((int)Math.Floor((mapObject.Y - originY) / chunkHeight), 0, document.ChunkRows - 1),
@@ -206,7 +207,7 @@ public static class TMapExporter
             generatedAt,
             document.FilePath is null ? null : Path.GetFileName(document.FilePath),
             "grid",
-            document.Layers.Select(layer => layer.Name).ToList(),
+            document.Layers.Select(layer => new TMapExportLayerInfo(layer.Name, layer.Type)).ToList(),
             document.GridSize,
             rows,
             columns,
@@ -215,10 +216,21 @@ public static class TMapExporter
             "sourceLayerLeftBottom",
             document.Width,
             document.Height,
-            objects,
+            objects);
+        var pathManifest = new TMapExportGridPathManifest(
+            generatedAt,
+            document.FilePath is null ? null : Path.GetFileName(document.FilePath),
+            "gridPath",
+            document.GridSize,
+            rows,
+            columns,
+            "sourceLayerLeftBottom",
+            document.Width,
+            document.Height,
             walkableCells,
             blockedCells);
-        WriteGridManifest(Path.Combine(outputDirectory, "Grid.json"), manifest);
+        WriteGridManifest(Path.Combine(outputDirectory, "Grid.json"), manifest, layerManifests);
+        WriteGridPathManifest(Path.Combine(outputDirectory, "GridPath.json"), pathManifest);
         return (walkableCells?.Count ?? 0, blockedCells?.Count ?? 0, objects.Count);
     }
 
@@ -373,20 +385,41 @@ public static class TMapExporter
             var name = LayerNameValidator.Validate(layer.Name);
             if (!layerNames.Add(name)) throw new InvalidDataException($"存在重名图层：{name}。");
         }
-        var orphan = document.Sprites.FirstOrDefault(sprite => !layerNames.Contains(sprite.Layer));
+        var imageLayerNames = document.Layers.Where(layer => layer.Type == TMapLayerType.Image)
+            .Select(layer => layer.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var reservedGridFields = new HashSet<string>(
+            ["generatedAt", "tmapFile", "exportType", "layers", "gridSize", "rows", "columns",
+             "chunkRows", "chunkColumns", "originMode", "sourceLayerWidth", "sourceLayerHeight", "objects"],
+            StringComparer.OrdinalIgnoreCase);
+        var conflictingLayer = imageLayerNames.FirstOrDefault(reservedGridFields.Contains);
+        if (conflictingLayer is not null)
+            throw new InvalidDataException($"图片层名称“{conflictingLayer}”与 Grid 导出字段重名，请先重命名该层级。");
+        var orphan = document.Sprites.FirstOrDefault(sprite => !imageLayerNames.Contains(sprite.Layer));
         if (orphan is not null)
             throw new InvalidDataException($"图片元素“{orphan.Name}”引用了不存在的图层“{orphan.Layer}”。");
+        var objectLayerNames = document.Layers.Where(layer => layer.Type == TMapLayerType.Object)
+            .Select(layer => layer.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var orphanObject = document.Objects.FirstOrDefault(mapObject => !objectLayerNames.Contains(mapObject.Layer));
+        if (orphanObject is not null)
+            throw new InvalidDataException($"对象元素“{orphanObject.Name}”引用了不存在的对象层“{orphanObject.Layer}”。");
     }
 
     private static void CleanupGeneratedLayerOutputs(TMapDocument document, string outputDirectory)
     {
         var currentLayers = document.Layers
+            .Where(layer => layer.Type == TMapLayerType.Image)
             .Select(layer => LayerNameValidator.Validate(layer.Name))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         foreach (var layerName in currentLayers)
         {
             CleanupGeneratedLayer(Path.Combine(outputDirectory, layerName), layerName);
+        }
+
+        foreach (var layerName in ReadPreviouslyExportedImageLayers(Path.Combine(outputDirectory, "Grid.json")))
+        {
+            if (!currentLayers.Contains(layerName))
+                CleanupGeneratedLayer(Path.Combine(outputDirectory, layerName), layerName);
         }
 
         foreach (var layerDirectory in Directory.EnumerateDirectories(outputDirectory))
@@ -436,20 +469,83 @@ public static class TMapExporter
         }
     }
 
+    private static HashSet<string> ReadPreviouslyExportedImageLayers(string gridPath)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!File.Exists(gridPath)) return names;
+        try
+        {
+            using var json = JsonDocument.Parse(File.ReadAllText(gridPath));
+            if (!json.RootElement.TryGetProperty("layers", out var layers) || layers.ValueKind != JsonValueKind.Array)
+                return names;
+            foreach (var layer in layers.EnumerateArray())
+            {
+                if (layer.ValueKind == JsonValueKind.String)
+                {
+                    var legacyName = layer.GetString();
+                    if (!string.IsNullOrWhiteSpace(legacyName)) names.Add(legacyName);
+                    continue;
+                }
+                if (layer.ValueKind != JsonValueKind.Object ||
+                    !layer.TryGetProperty("name", out var name) ||
+                    !layer.TryGetProperty("type", out var type) ||
+                    !string.Equals(type.GetString(), nameof(TMapLayerType.Image), StringComparison.OrdinalIgnoreCase))
+                    continue;
+                var imageName = name.GetString();
+                if (!string.IsNullOrWhiteSpace(imageName)) names.Add(imageName);
+            }
+        }
+        catch (JsonException)
+        {
+            // 非本工具生成或已损坏的 Grid 文件不参与清理。
+        }
+        return names;
+    }
+
     private static void DeleteDirectoryIfEmpty(string path)
     {
         if (Directory.Exists(path) && !Directory.EnumerateFileSystemEntries(path).Any())
             Directory.Delete(path);
     }
 
-    private static void WriteLayerManifest(string path, TMapExportLayerManifest value)
+    private static void WriteGridManifest(
+        string path,
+        TMapExportGridManifest value,
+        IReadOnlyList<KeyValuePair<string, TMapExportLayerManifest>> layerManifests)
     {
-        File.WriteAllText(path, JsonSerializer.Serialize(value, TMapJsonContext.Default.TMapExportLayerManifest) + Environment.NewLine);
+        using var buffer = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { Indented = true }))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("generatedAt", value.GeneratedAt);
+            if (value.TmapFile is not null) writer.WriteString("tmapFile", value.TmapFile);
+            writer.WriteString("exportType", value.ExportType);
+            writer.WritePropertyName("layers");
+            JsonSerializer.Serialize(writer, value.Layers, TMapJsonContext.Default.ListTMapExportLayerInfo);
+            writer.WriteNumber("gridSize", value.GridSize);
+            writer.WriteNumber("rows", value.Rows);
+            writer.WriteNumber("columns", value.Columns);
+            writer.WriteNumber("chunkRows", value.ChunkRows);
+            writer.WriteNumber("chunkColumns", value.ChunkColumns);
+            writer.WriteString("originMode", value.OriginMode);
+            writer.WriteNumber("sourceLayerWidth", value.SourceLayerWidth);
+            writer.WriteNumber("sourceLayerHeight", value.SourceLayerHeight);
+            writer.WritePropertyName("objects");
+            JsonSerializer.Serialize(writer, value.Objects, TMapJsonContext.Default.ListTMapExportObjectManifest);
+            foreach (var (layerName, layerManifest) in layerManifests)
+            {
+                writer.WritePropertyName(layerName);
+                JsonSerializer.Serialize(writer, layerManifest, TMapJsonContext.Default.TMapExportLayerManifest);
+            }
+            writer.WriteEndObject();
+        }
+        File.WriteAllText(path, System.Text.Encoding.UTF8.GetString(buffer.ToArray()) + Environment.NewLine);
     }
 
-    private static void WriteGridManifest(string path, TMapExportGridManifest value)
+    private static void WriteGridPathManifest(string path, TMapExportGridPathManifest value)
     {
-        File.WriteAllText(path, JsonSerializer.Serialize(value, TMapJsonContext.Default.TMapExportGridManifest) + Environment.NewLine);
+        File.WriteAllText(path,
+            JsonSerializer.Serialize(value, TMapJsonContext.Default.TMapExportGridPathManifest) + Environment.NewLine);
     }
 
 }

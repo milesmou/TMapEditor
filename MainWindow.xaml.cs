@@ -26,7 +26,6 @@ public partial class MainWindow : Window
     private Point _resourceDragStart;
     private PointerPressedEventArgs? _resourceDragPress;
     private TMapResource? _draggedResource;
-    private bool _showObjectEntities;
     private bool _restoringUndo;
     private bool _closingConfirmed;
     private string? _undoSnapshot;
@@ -327,7 +326,11 @@ public partial class MainWindow : Window
                 case TMapObject mapObject:
                     CaptureUndoSnapshot();
                     mapObject.Name = RequiredName(ItemNameText.Text);
-                    mapObject.Args = ObjectArgsText.Text.Trim();
+                    var selectedObjectLayer = ObjectLayerCombo.SelectedItem as TMapLayer;
+                    mapObject.Layer = selectedObjectLayer?.Name ?? mapObject.Layer;
+                    if (selectedObjectLayer is not null && !ReferenceEquals(LayerList.SelectedItem, selectedObjectLayer))
+                        LayerList.SelectedItem = selectedObjectLayer;
+                    mapObject.Args = ObjectArgsText.Text?.Trim() ?? "";
                     mapObject.X = ParseDouble(ObjectXText.Text, "X");
                     mapObject.Y = ParseDouble(ObjectYText.Text, "Y");
                     break;
@@ -404,7 +407,6 @@ public partial class MainWindow : Window
             EditorTool.WalkBrush => "行进区域画刷：按住左键连续刷，按住右键框选刷格子，Esc 中断",
             EditorTool.BlockBrush => "阻挡区域画刷：按住左键连续刷，按住右键框选刷格子，Esc 中断",
             EditorTool.EraseBrush => "清除格子画刷：按住左键连续清除，按住右键框选清除，Esc 中断",
-            EditorTool.Object => "对象点：单击地图放置",
             _ => "选择模式：左键移动，滚轮缩放，中键/空格拖动画布"
         };
     }
@@ -415,7 +417,6 @@ public partial class MainWindow : Window
         EditorCanvas.ShowGrid = ShowGridCheck.IsChecked == true;
         EditorCanvas.ShowChunks = ShowChunksCheck.IsChecked == true;
         EditorCanvas.ShowCells = ShowWaypointsCheck.IsChecked == true;
-        EditorCanvas.ShowObjects = ShowObjectsCheck.IsChecked == true;
         EditorCanvas.SnapToGrid = SnapCheck.IsChecked == true;
         EditorCanvas.InvalidateVisual();
     }
@@ -433,42 +434,32 @@ public partial class MainWindow : Window
         if (LayerList.SelectedItem is TMapLayer layer)
         {
             EditorCanvas.DropTargetLayer = layer.Name;
+            if (layer.Type == TMapLayerType.Object)
+            {
+                EditorCanvas.Tool = EditorTool.Select;
+                ToolHintText.Text = "对象层：单击空白处添加对象点，拖动已有对象点可移动";
+            }
+            else if (EditorCanvas.Tool == EditorTool.Select)
+            {
+                ToolHintText.Text = "选择模式：左键移动，滚轮缩放，中键/空格拖动画布";
+            }
         }
         else
         {
             EditorCanvas.DropTargetLayer = "";
         }
-        if (IsInitialized && !_showObjectEntities)
+        if (IsInitialized)
         {
             var layerName = (LayerList.SelectedItem as TMapLayer)?.Name;
             EditorCanvas.SetSelectedItems(EditorCanvas.SelectedItems.Where(item =>
-                item is TMapSprite sprite && sprite.Layer == layerName));
+                item switch
+                {
+                    TMapSprite sprite => sprite.Layer == layerName,
+                    TMapObject mapObject => mapObject.Layer == layerName,
+                    _ => false
+                }));
             RefreshEntityList();
         }
-    }
-
-    private void EntityViewButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (!IsInitialized) return;
-        SetEntityView(sender == ObjectElementsViewButton);
-    }
-
-    private void SetEntityView(bool showObjects)
-    {
-        _showObjectEntities = showObjects;
-        MapElementsViewButton.IsChecked = !showObjects;
-        ObjectElementsViewButton.IsChecked = showObjects;
-        if (showObjects)
-        {
-            EditorCanvas.SetSelectedItems(EditorCanvas.SelectedItems.OfType<TMapObject>());
-        }
-        else
-        {
-            var layerName = (LayerList.SelectedItem as TMapLayer)?.Name;
-            EditorCanvas.SetSelectedItems(EditorCanvas.SelectedItems.OfType<TMapSprite>()
-                .Where(sprite => sprite.Layer == layerName));
-        }
-        RefreshEntityList();
     }
 
     private void EntityList_PointerPressed(object sender, PointerPressedEventArgs e)
@@ -505,16 +496,17 @@ public partial class MainWindow : Window
 
     private async void AddLayer_Click(object sender, RoutedEventArgs e)
     {
-        var defaultName = GetUniqueLayerName("Layer");
-        var name = await PromptForLayerName("新增图层", defaultName);
-        if (name is null) return;
+        var result = await PromptForLayer("新增层级", GetUniqueLayerName("Layer"), true);
+        if (result is null) return;
+        var (name, layerType) = result.Value;
+        var typeName = layerType == TMapLayerType.Object ? "对象层" : "图片层";
         CaptureUndoSnapshot();
-        var layer = new TMapLayer { Name = name };
+        var layer = new TMapLayer { Name = name, Type = layerType };
         _document.Layers.Add(layer);
         RefreshLayerControls(layer);
         SetDirty(true);
         EditorCanvas.InvalidateVisual();
-        StatusText.Text = $"已新增图层：{name}";
+        StatusText.Text = $"已新增{typeName}：{name}";
     }
 
     private async void RenameLayer_Click(object sender, RoutedEventArgs e)
@@ -526,10 +518,12 @@ public partial class MainWindow : Window
         }
 
         var oldName = layer.Name;
-        var name = await PromptForLayerName("重命名图层", oldName, layer);
-        if (name is null || name == oldName) return;
+        var result = await PromptForLayer("重命名层级", oldName, false, layer);
+        if (result is null || result.Value.Name == oldName) return;
+        var name = result.Value.Name;
         CaptureUndoSnapshot();
         foreach (var sprite in _document.Sprites.Where(sprite => sprite.Layer == oldName)) sprite.Layer = name;
+        foreach (var mapObject in _document.Objects.Where(mapObject => mapObject.Layer == oldName)) mapObject.Layer = name;
         layer.Name = name;
         RefreshLayerControls(layer);
         RefreshEntityList();
@@ -548,15 +542,18 @@ public partial class MainWindow : Window
         }
 
         var sprites = _document.Sprites.Where(sprite => sprite.Layer == layer.Name).ToList();
-        var message = sprites.Count == 0
+        var objects = _document.Objects.Where(mapObject => mapObject.Layer == layer.Name).ToList();
+        var elementCount = sprites.Count + objects.Count;
+        var message = elementCount == 0
             ? $"确定删除图层“{layer.Name}”吗？"
-            : $"图层“{layer.Name}”中有 {sprites.Count} 个图片元素。\n删除图层会同时删除这些元素，是否继续？";
+            : $"图层“{layer.Name}”中有 {elementCount} 个元素。\n删除图层会同时删除这些元素，是否继续？";
         if (await ShowMessage("删除图层", message, ["是", "否"]) != "是") return;
 
         CaptureUndoSnapshot();
         var oldIndex = _document.Layers.IndexOf(layer);
-        EditorCanvas.SetSelectedItems(EditorCanvas.SelectedItems.Except(sprites));
+        EditorCanvas.SetSelectedItems(EditorCanvas.SelectedItems.Except(sprites).Except(objects));
         foreach (var sprite in sprites) _document.Sprites.Remove(sprite);
+        foreach (var mapObject in objects) _document.Objects.Remove(mapObject);
         _document.Layers.Remove(layer);
         var nextLayer = _document.Layers.Count == 0
             ? null
@@ -568,12 +565,16 @@ public partial class MainWindow : Window
         StatusText.Text = $"已删除图层：{layer.Name}";
     }
 
-    private async Task<string?> PromptForLayerName(string title, string initialName, TMapLayer? excludedLayer = null)
+    private async Task<(string Name, TMapLayerType Type)?> PromptForLayer(
+        string title,
+        string initialName,
+        bool allowTypeSelection,
+        TMapLayer? excludedLayer = null)
     {
         var candidate = initialName;
         while (true)
         {
-            var dialog = new LayerNameDialog(title, candidate);
+            var dialog = new LayerNameDialog(title, candidate, allowTypeSelection, excludedLayer?.Type ?? TMapLayerType.Image);
             if (await dialog.ShowDialog<bool>(this) != true) return null;
             candidate = dialog.LayerName;
             try
@@ -582,7 +583,7 @@ public partial class MainWindow : Window
                 if (_document.Layers.Any(layer => !ReferenceEquals(layer, excludedLayer) &&
                                                   string.Equals(layer.Name, name, StringComparison.OrdinalIgnoreCase)))
                     throw new InvalidDataException($"图层“{name}”已经存在。");
-                return name;
+                return (name, dialog.LayerType);
             }
             catch (Exception exception)
             {
@@ -611,9 +612,14 @@ public partial class MainWindow : Window
         try
         {
             SpriteLayerCombo.ItemsSource = null;
-            SpriteLayerCombo.ItemsSource = _document.Layers;
+            SpriteLayerCombo.ItemsSource = _document.Layers.Where(layer => layer.Type == TMapLayerType.Image).ToList();
             SpriteLayerCombo.SelectedItem = EditorCanvas.SelectedItem is TMapSprite sprite
                 ? _document.Layers.FirstOrDefault(layer => layer.Name == sprite.Layer)
+                : null;
+            ObjectLayerCombo.ItemsSource = null;
+            ObjectLayerCombo.ItemsSource = _document.Layers.Where(layer => layer.Type == TMapLayerType.Object).ToList();
+            ObjectLayerCombo.SelectedItem = EditorCanvas.SelectedItem is TMapObject mapObject
+                ? _document.Layers.FirstOrDefault(layer => layer.Name == mapObject.Layer)
                 : null;
         }
         finally
@@ -671,10 +677,15 @@ public partial class MainWindow : Window
 
     private void EditorCanvas_SelectedItemChanged(object? sender, object? item)
     {
-        if (item is TMapObject && !_showObjectEntities)
-            SetEntityView(true);
-        else if (item is TMapSprite && _showObjectEntities)
-            SetEntityView(false);
+        var layerName = item switch
+        {
+            TMapSprite sprite => sprite.Layer,
+            TMapObject mapObject => mapObject.Layer,
+            _ => null
+        };
+        var itemLayer = _document.Layers.FirstOrDefault(layer => layer.Name == layerName);
+        if (itemLayer is not null && !ReferenceEquals(LayerList.SelectedItem, itemLayer))
+            LayerList.SelectedItem = itemLayer;
         _synchronizingSelection = true;
         EntityList.SelectedItems.Clear();
         foreach (var selectedItem in EditorCanvas.SelectedItems)
@@ -745,6 +756,7 @@ public partial class MainWindow : Window
                 case TMapObject mapObject:
                     SelectionTypeText.Text = "地图对象";
                     ItemNameText.Text = mapObject.Name;
+                    ObjectLayerCombo.SelectedItem = _document.Layers.FirstOrDefault(layer => layer.Name == mapObject.Layer);
                     ObjectArgsText.Text = mapObject.Args;
                     ObjectXText.Text = Format(mapObject.X);
                     ObjectYText.Text = Format(mapObject.Y);
@@ -775,11 +787,10 @@ public partial class MainWindow : Window
 
     private List<object> GetCurrentEntityItems()
     {
-        if (_showObjectEntities) return _document.Objects.Cast<object>().ToList();
-        var layerName = (LayerList.SelectedItem as TMapLayer)?.Name;
-        return layerName is null
-            ? []
-            : _document.Sprites.Where(sprite => sprite.Layer == layerName).Cast<object>().ToList();
+        if (LayerList.SelectedItem is not TMapLayer layer) return [];
+        return layer.Type == TMapLayerType.Object
+            ? _document.Objects.Where(mapObject => mapObject.Layer == layer.Name).Cast<object>().ToList()
+            : _document.Sprites.Where(sprite => sprite.Layer == layer.Name).Cast<object>().ToList();
     }
 
     private void RefreshResourceList()
@@ -941,7 +952,7 @@ public partial class MainWindow : Window
             var restored = JsonSerializer.Deserialize(_undoSnapshot, TMapJsonContext.Default.TMapDocument)
                            ?? throw new InvalidDataException("无法恢复撤销状态。");
             restored.FilePath = filePath;
-            TMapFileService.RefreshResourcePaths(restored);
+            TMapFileService.Normalize(restored);
             _restoringUndo = true;
             SetDocument(restored);
             _restoringUndo = false;

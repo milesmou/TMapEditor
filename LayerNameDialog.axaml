@@ -8,11 +8,19 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
-        <TextBlock Text="图层名称" Margin="3,0,3,4" />
+        <TextBlock Text="层级名称" Margin="3,0,3,4" />
         <TextBox x:Name="LayerNameText" Grid.Row="1" />
-        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom">
+        <StackPanel x:Name="LayerTypePanel" Grid.Row="2" Margin="0,10,0,0" IsVisible="False">
+            <TextBlock Text="层级类型" Margin="3,0,3,4" />
+            <ComboBox x:Name="LayerTypeCombo" SelectedIndex="0">
+                <ComboBoxItem Content="图片层" />
+                <ComboBoxItem Content="对象层" />
+            </ComboBox>
+        </StackPanel>
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom">
             <Button Content="确定" IsDefault="True" Click="Ok_Click" MinWidth="72" />
             <Button Content="取消" IsCancel="True" MinWidth="72" />
         </StackPanel>

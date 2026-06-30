@@ -50,10 +50,20 @@ public sealed class TMapResource : IDisplayItem
     public string DisplayName => Name;
 }
 
+public enum TMapLayerType
+{
+    Image,
+    Object
+}
+
 public sealed class TMapLayer
 {
     public string Name { get; set; } = "Layer";
     public bool Visible { get; set; } = true;
+    public TMapLayerType Type { get; set; }
+
+    [JsonIgnore]
+    public string TypeIcon => Type == TMapLayerType.Object ? "◆" : "🖼";
 }
 
 public sealed class TMapSprite : ILockableDisplayItem
@@ -98,6 +108,7 @@ public sealed class TMapObject : ILockableDisplayItem
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = "Object";
+    public string Layer { get; set; } = "";
     public string Args { get; set; } = "";
     public double X { get; set; }
     public double Y { get; set; }
