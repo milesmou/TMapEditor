@@ -1,6 +1,6 @@
 # TMap Editor
 
-基于 Avalonia 的独立跨平台地图编辑器，编辑源文件使用可读 JSON 格式 `.tmap`，烘焙结果兼容现有游戏地图加载结构。
+基于 .NET 10 + Avalonia 12 的独立跨平台地图编辑器，编辑源文件使用可读 JSON 格式 `.tmap`，烘焙结果兼容现有游戏地图加载结构。
 
 格式定义见 [TMAP_FORMAT.md](TMAP_FORMAT.md)。
 
