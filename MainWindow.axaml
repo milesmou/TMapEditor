@@ -96,7 +96,7 @@
                 <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch"
                               Background="#444850" />
 
-                <Grid Grid.Row="2" Margin="8,0,8,4" RowDefinitions="Auto,Auto,*,Auto">
+                <Grid Grid.Row="2" Margin="8,0,8,4" RowDefinitions="Auto,Auto,*,Auto,Auto">
                     <Separator Margin="0,0,0,6" />
                     <TextBlock Grid.Row="1" Text="地图层级" FontSize="16" FontWeight="SemiBold" Margin="4,2,4,6" />
                     <ListBox Grid.Row="2" x:Name="LayerList" SelectionChanged="LayerList_SelectionChanged">
@@ -131,6 +131,10 @@
                         <Button Content="新增" Click="AddLayer_Click" />
                         <Button Content="重命名" Click="RenameLayer_Click" />
                         <Button Content="删除" Click="DeleteLayer_Click" />
+                    </UniformGrid>
+                    <UniformGrid Grid.Row="4" Columns="2">
+                        <Button Content="上移（靠前）" Click="MoveLayerUp_Click" />
+                        <Button Content="下移（靠后）" Click="MoveLayerDown_Click" />
                     </UniformGrid>
                 </Grid>
 
@@ -189,12 +193,12 @@
                     <TextBlock Text="属性" FontSize="16" FontWeight="SemiBold" Margin="2,6" />
                     <TextBlock x:Name="SelectionTypeText" Text="未选择" Foreground="#9EA5B0" Margin="2,0,2,10" />
 
-                    <StackPanel x:Name="CommonPropertyPanel" IsVisible="False">
+                    <StackPanel x:Name="CommonPropertyPanel" IsVisible="False" Spacing="4">
                         <TextBlock Text="名称" />
                         <TextBox x:Name="ItemNameText" />
                     </StackPanel>
 
-                    <StackPanel x:Name="SpritePropertyPanel" IsVisible="False">
+                    <StackPanel x:Name="SpritePropertyPanel" IsVisible="False" Spacing="6">
                         <TextBlock Text="图层" />
                         <ComboBox x:Name="SpriteLayerCombo" SelectionChanged="SelectionProperty_SelectionChanged">
                             <ComboBox.ItemTemplate>
@@ -220,7 +224,7 @@
                         <Button Content="重置属性" Click="ResetSpriteProperties_Click" />
                     </StackPanel>
 
-                    <StackPanel x:Name="ObjectPropertyPanel" IsVisible="False">
+                    <StackPanel x:Name="ObjectPropertyPanel" IsVisible="False" Spacing="6">
                         <TextBlock Text="图层" />
                         <ComboBox x:Name="ObjectLayerCombo" SelectionChanged="SelectionProperty_SelectionChanged">
                             <ComboBox.ItemTemplate>
@@ -231,6 +235,11 @@
                         </ComboBox>
                         <TextBlock Text="Args" />
                         <TextBox x:Name="ObjectArgsText" />
+                        <TextBlock Text="显示颜色" />
+                        <ColorPicker x:Name="ObjectDisplayColorPicker" Color="#00BFFF"
+                                     Width="120" HorizontalAlignment="Left"
+                                     IsAlphaEnabled="False" IsAlphaVisible="False"
+                                     ColorChanged="ObjectDisplayColorPicker_ColorChanged" />
                         <UniformGrid Columns="2">
                             <StackPanel><TextBlock Text="X" /><TextBox x:Name="ObjectXText" /></StackPanel>
                             <StackPanel><TextBlock Text="Y" /><TextBox x:Name="ObjectYText" /></StackPanel>

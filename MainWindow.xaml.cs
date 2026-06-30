@@ -9,6 +9,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using TMapEditor.Controls;
 using TMapEditor.Models;
@@ -30,11 +31,14 @@ public partial class MainWindow : Window
     private bool _closingConfirmed;
     private string? _undoSnapshot;
     private string _currentSnapshot = "";
+    private readonly DispatcherTimer _objectColorCommitTimer = new() { Interval = TimeSpan.FromMilliseconds(250) };
+    private bool _objectColorChangePending;
 
     public MainWindow()
     {
         _settings = EditorSettingsService.Load();
         InitializeComponent();
+        _objectColorCommitTimer.Tick += (_, _) => FlushObjectColorChange();
         ResourceList.AddHandler(
             PointerPressedEvent,
             ResourceList_PointerPressed,
@@ -140,6 +144,7 @@ public partial class MainWindow : Window
 
     private async Task<bool> SaveDocument(bool saveAs)
     {
+        FlushObjectColorChange();
         var filePath = _document.FilePath;
         if (saveAs || filePath is null)
         {
@@ -331,6 +336,7 @@ public partial class MainWindow : Window
                     if (selectedObjectLayer is not null && !ReferenceEquals(LayerList.SelectedItem, selectedObjectLayer))
                         LayerList.SelectedItem = selectedObjectLayer;
                     mapObject.Args = ObjectArgsText.Text?.Trim() ?? "";
+                    mapObject.DisplayColor = FormatDisplayColor(ObjectDisplayColorPicker.Color);
                     mapObject.X = ParseDouble(ObjectXText.Text, "X");
                     mapObject.Y = ParseDouble(ObjectYText.Text, "Y");
                     break;
@@ -365,6 +371,32 @@ public partial class MainWindow : Window
     {
         if (_updatingSelectionProperties || !IsInitialized) return;
         ApplySelectionProperties();
+    }
+
+    private void ObjectDisplayColorPicker_ColorChanged(object? sender, ColorChangedEventArgs e)
+    {
+        if (_updatingSelectionProperties || !IsInitialized || EditorCanvas.SelectedItem is not TMapObject mapObject)
+            return;
+        var color = FormatDisplayColor(e.NewColor);
+        if (mapObject.DisplayColor == color) return;
+        if (!_objectColorChangePending)
+        {
+            CaptureUndoSnapshot();
+            _objectColorChangePending = true;
+        }
+        mapObject.DisplayColor = color;
+        _objectColorCommitTimer.Stop();
+        _objectColorCommitTimer.Start();
+        StatusText.Text = "对象点颜色已更新";
+    }
+
+    private void FlushObjectColorChange()
+    {
+        _objectColorCommitTimer.Stop();
+        if (!_objectColorChangePending) return;
+        _objectColorChangePending = false;
+        SetDirty(true);
+        EditorCanvas.InvalidateVisual();
     }
 
     private async void ResetSpriteProperties_Click(object sender, RoutedEventArgs e)
@@ -533,7 +565,7 @@ public partial class MainWindow : Window
         var typeName = layerType == TMapLayerType.Object ? "对象层" : "图片层";
         CaptureUndoSnapshot();
         var layer = new TMapLayer { Name = name, Type = layerType };
-        _document.Layers.Add(layer);
+        _document.Layers.Insert(0, layer);
         RefreshLayerControls(layer);
         SetDirty(true);
         EditorCanvas.InvalidateVisual();
@@ -594,6 +626,34 @@ public partial class MainWindow : Window
         SetDirty(true);
         EditorCanvas.InvalidateVisual();
         StatusText.Text = $"已删除图层：{layer.Name}";
+    }
+
+    private void MoveLayerUp_Click(object sender, RoutedEventArgs e)
+    {
+        MoveSelectedLayer(-1);
+    }
+
+    private void MoveLayerDown_Click(object sender, RoutedEventArgs e)
+    {
+        MoveSelectedLayer(1);
+    }
+
+    private void MoveSelectedLayer(int offset)
+    {
+        if (LayerList.SelectedItem is not TMapLayer layer) return;
+        var oldIndex = _document.Layers.IndexOf(layer);
+        var newIndex = oldIndex + offset;
+        if (oldIndex < 0 || newIndex < 0 || newIndex >= _document.Layers.Count) return;
+
+        CaptureUndoSnapshot();
+        _document.Layers.RemoveAt(oldIndex);
+        _document.Layers.Insert(newIndex, layer);
+        RefreshLayerControls(layer);
+        SetDirty(true);
+        EditorCanvas.InvalidateVisual();
+        StatusText.Text = offset < 0
+            ? $"图层已上移：{layer.Name}"
+            : $"图层已下移：{layer.Name}";
     }
 
     private async Task<(string Name, TMapLayerType Type)?> PromptForLayer(
@@ -708,6 +768,7 @@ public partial class MainWindow : Window
 
     private void EditorCanvas_SelectedItemChanged(object? sender, object? item)
     {
+        FlushObjectColorChange();
         var layerName = item switch
         {
             TMapSprite sprite => sprite.Layer,
@@ -789,6 +850,7 @@ public partial class MainWindow : Window
                     ItemNameText.Text = mapObject.Name;
                     ObjectLayerCombo.SelectedItem = _document.Layers.FirstOrDefault(layer => layer.Name == mapObject.Layer);
                     ObjectArgsText.Text = mapObject.Args;
+                    ObjectDisplayColorPicker.Color = ParseDisplayColor(mapObject.DisplayColor);
                     ObjectXText.Text = Format(mapObject.X);
                     ObjectYText.Text = Format(mapObject.Y);
                     break;
@@ -902,6 +964,7 @@ public partial class MainWindow : Window
 
     private async void Window_Closing(object? sender, WindowClosingEventArgs e)
     {
+        FlushObjectColorChange();
         if (!_closingConfirmed && _dirty)
         {
             e.Cancel = true;
@@ -1060,6 +1123,21 @@ public partial class MainWindow : Window
             ? number
             : throw new InvalidDataException($"{fieldName}必须是有效数字。");
     }
+
+    private static Avalonia.Media.Color ParseDisplayColor(string? value)
+    {
+        try
+        {
+            return Avalonia.Media.Color.Parse(value ?? "#00BFFF");
+        }
+        catch (FormatException)
+        {
+            return Avalonia.Media.Color.FromRgb(0, 191, 255);
+        }
+    }
+
+    private static string FormatDisplayColor(Avalonia.Media.Color color) =>
+        $"#{color.R:X2}{color.G:X2}{color.B:X2}";
 
     private static bool TryDouble(string value, out double number)
     {

@@ -212,9 +212,9 @@ public sealed class MapCanvas : Control
         base.Render(dc);
         dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(30, 32, 36)), null, new Rect(Bounds.Size));
         DrawMapBackground(dc);
-        DrawSprites(dc);
+        DrawImageLayers(dc);
         if (ShowCells) DrawCells(dc);
-        DrawObjects(dc);
+        DrawObjectLayers(dc);
         DrawCellBrushPreview(dc);
         if (ShowGrid) DrawGrid(dc);
         if (ShowChunks) DrawChunks(dc);
@@ -476,26 +476,40 @@ public sealed class MapCanvas : Control
             new Pen(new SolidColorBrush(Color.FromRgb(130, 135, 145)), 1), rect);
     }
 
-    private void DrawSprites(DrawingContext dc)
+    private void DrawImageLayers(DrawingContext dc)
     {
-        var visibleLayers = Document.Layers.Where(layer => layer.Visible && layer.Type == TMapLayerType.Image)
-            .Select(layer => layer.Name).ToHashSet(StringComparer.Ordinal);
-        foreach (var sprite in Document.Sprites.Where(s => visibleLayers.Contains(s.Layer)).OrderBy(s => s.Order))
+        foreach (var layer in Document.Layers
+                     .Where(layer => layer.Visible && layer.Type == TMapLayerType.Image).Reverse())
         {
-            var bitmap = LoadBitmap(sprite.ImagePath);
-            if (bitmap is null) continue;
-            var center = MapToScreen(new TMapPoint(sprite.X, sprite.Y));
-            using (dc.PushTransform(Matrix.CreateTranslation(center.X, center.Y)))
-            using (dc.PushTransform(Matrix.CreateRotation(-sprite.Rotation * Math.PI / 180)))
-            using (dc.PushTransform(Matrix.CreateScale(sprite.ScaleX * _zoom, sprite.ScaleY * _zoom)))
-            {
-                var rect = new Rect(
-                    -sprite.AnchorX * sprite.Width,
-                    -(1 - sprite.AnchorY) * sprite.Height,
-                    sprite.Width,
-                    sprite.Height);
-                dc.DrawImage(bitmap, rect);
-            }
+            foreach (var sprite in Document.Sprites.Where(sprite => sprite.Layer == layer.Name)
+                         .OrderBy(sprite => sprite.Order))
+                DrawSprite(dc, sprite);
+        }
+    }
+
+    private void DrawObjectLayers(DrawingContext dc)
+    {
+        foreach (var layer in Document.Layers
+                     .Where(layer => layer.Visible && layer.Type == TMapLayerType.Object).Reverse())
+        foreach (var mapObject in Document.Objects.Where(mapObject => mapObject.Layer == layer.Name))
+            DrawObject(dc, mapObject);
+    }
+
+    private void DrawSprite(DrawingContext dc, TMapSprite sprite)
+    {
+        var bitmap = LoadBitmap(sprite.ImagePath);
+        if (bitmap is null) return;
+        var center = MapToScreen(new TMapPoint(sprite.X, sprite.Y));
+        using (dc.PushTransform(Matrix.CreateTranslation(center.X, center.Y)))
+        using (dc.PushTransform(Matrix.CreateRotation(-sprite.Rotation * Math.PI / 180)))
+        using (dc.PushTransform(Matrix.CreateScale(sprite.ScaleX * _zoom, sprite.ScaleY * _zoom)))
+        {
+            var rect = new Rect(
+                -sprite.AnchorX * sprite.Width,
+                -(1 - sprite.AnchorY) * sprite.Height,
+                sprite.Width,
+                sprite.Height);
+            dc.DrawImage(bitmap, rect);
         }
     }
 
@@ -511,16 +525,24 @@ public sealed class MapCanvas : Control
         }
     }
 
-    private void DrawObjects(DrawingContext dc)
+    private void DrawObject(DrawingContext dc, TMapObject mapObject)
     {
-        var visibleLayers = Document.Layers.Where(layer => layer.Visible && layer.Type == TMapLayerType.Object)
-            .Select(layer => layer.Name).ToHashSet(StringComparer.Ordinal);
-        foreach (var mapObject in Document.Objects.Where(mapObject => visibleLayers.Contains(mapObject.Layer)))
+        var point = MapToScreen(new TMapPoint(mapObject.X, mapObject.Y));
+        var brush = new SolidColorBrush(ParseDisplayColor(mapObject.DisplayColor));
+        var outline = _selectedItems.Contains(mapObject) ? Brushes.Yellow : Brushes.White;
+        dc.DrawEllipse(brush, new Pen(outline, _selectedItems.Contains(mapObject) ? 2 : 1), point, 6, 6);
+        dc.DrawText(CreateText(mapObject.Name, 12), new Point(point.X + 8, point.Y - 17));
+    }
+
+    private static Color ParseDisplayColor(string? value)
+    {
+        try
         {
-            var point = MapToScreen(new TMapPoint(mapObject.X, mapObject.Y));
-            var brush = _selectedItems.Contains(mapObject) ? Brushes.Yellow : Brushes.DeepSkyBlue;
-            dc.DrawEllipse(brush, new Pen(Brushes.White, 1), point, 6, 6);
-            dc.DrawText(CreateText(mapObject.Name, 12), new Point(point.X + 8, point.Y - 17));
+            return Color.Parse(value ?? "#00BFFF");
+        }
+        catch (FormatException)
+        {
+            return Color.FromRgb(0, 191, 255);
         }
     }
 
@@ -821,21 +843,23 @@ public sealed class MapCanvas : Control
 
     private object? HitTestItem(TMapPoint mapPoint, Point screenPoint)
     {
-        var visibleObjectLayers = Document.Layers
-            .Where(layer => layer.Visible && layer.Type == TMapLayerType.Object)
-            .Select(layer => layer.Name).ToHashSet(StringComparer.Ordinal);
-        foreach (var mapObject in Document.Objects
-                     .Where(item => !item.IsLocked && visibleObjectLayers.Contains(item.Layer)).Reverse())
+        foreach (var layer in Document.Layers.Where(layer => layer.Visible && layer.Type == TMapLayerType.Object))
         {
-            var p = MapToScreen(new TMapPoint(mapObject.X, mapObject.Y));
-            if (Distance(p, screenPoint) <= 10) return mapObject;
+            foreach (var mapObject in Document.Objects
+                         .Where(item => !item.IsLocked && item.Layer == layer.Name).Reverse())
+            {
+                var point = MapToScreen(new TMapPoint(mapObject.X, mapObject.Y));
+                if (Distance(point, screenPoint) <= 10) return mapObject;
+            }
         }
-        var visibleLayers = Document.Layers.Where(layer => layer.Visible && layer.Type == TMapLayerType.Image)
-            .Select(layer => layer.Name).ToHashSet(StringComparer.Ordinal);
-        foreach (var sprite in Document.Sprites.Where(sprite => !sprite.IsLocked && visibleLayers.Contains(sprite.Layer))
-                     .OrderByDescending(sprite => sprite.Order))
+        foreach (var layer in Document.Layers.Where(layer => layer.Visible && layer.Type == TMapLayerType.Image))
         {
-            if (HitTestSprite(mapPoint, sprite)) return sprite;
+            foreach (var sprite in Document.Sprites
+                         .Where(sprite => !sprite.IsLocked && sprite.Layer == layer.Name)
+                         .OrderByDescending(sprite => sprite.Order))
+            {
+                if (HitTestSprite(mapPoint, sprite)) return sprite;
+            }
         }
         return null;
     }

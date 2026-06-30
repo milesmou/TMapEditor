@@ -73,6 +73,8 @@ public static class TMapFileService
             .Select(group => group.Last())
             .ToList();
         document.Objects ??= [];
+        foreach (var mapObject in document.Objects.Where(mapObject => string.IsNullOrWhiteSpace(mapObject.DisplayColor)))
+            mapObject.DisplayColor = "#00BFFF";
         if (document.Objects.Count > 0)
         {
             var objectLayer = document.Layers.FirstOrDefault(layer => layer.Type == TMapLayerType.Object);

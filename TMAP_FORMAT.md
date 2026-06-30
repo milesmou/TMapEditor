@@ -68,7 +68,7 @@
 }
 ```
 
-对象通过 `layer` 保存所属对象层，同时保存名称与坐标。导出时编辑器计算其 `row`、`col`、`chunkRow` 和 `chunkCol`，并按对象层名称归入 `ObjectLayers`。
+对象通过 `layer` 保存所属对象层，同时保存名称、坐标与编辑器显示颜色 `displayColor`（`#RRGGBB` 或 `#AARRGGBB`）。导出时编辑器计算其 `row`、`col`、`chunkRow` 和 `chunkCol`，并按对象层名称归入 `ObjectLayers`；显示颜色不影响导出数据。
 
 图片元素和对象元素可包含布尔字段 `isLocked`；该字段只控制编辑器中的画布选中行为，不影响烘焙结果。旧文件未包含此字段时按未锁定处理。
 

@@ -112,6 +112,7 @@ public sealed class TMapObject : ILockableDisplayItem
     public string Args { get; set; } = "";
     public double X { get; set; }
     public double Y { get; set; }
+    public string DisplayColor { get; set; } = "#00BFFF";
     public bool IsLocked { get; set; }
 
     [JsonIgnore]
