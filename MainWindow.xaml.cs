@@ -411,6 +411,37 @@ public partial class MainWindow : Window
         };
     }
 
+    private async void OptimizeBlockedRegions_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var snapshot = CreateDocumentSnapshot(_document);
+            var result = BlockedRegionOptimizer.Optimize(_document);
+            if (!result.HasWalkableSeed)
+            {
+                await ShowMessage("优化阻挡区域", "请先标记至少一个行进格，用于确定可到达区域。", ["确定"]);
+                return;
+            }
+            if (result.AddedBlockedCells == 0 && result.AddedWalkableCells == 0)
+            {
+                StatusText.Text = "地图区域已全部标记";
+                return;
+            }
+
+            _undoSnapshot = snapshot;
+            RefreshCurrentSnapshot();
+            UpdateUndoMenu();
+            SetDirty(true);
+            EditorCanvas.InvalidateVisual();
+            StatusText.Text = $"阻挡区域优化完成：新增 {result.AddedBlockedCells} 个阻挡格，" +
+                              $"{result.AddedWalkableCells} 个行进格";
+        }
+        catch (Exception exception)
+        {
+            await ShowError("优化阻挡区域失败", exception);
+        }
+    }
+
     private void ViewOption_Changed(object sender, RoutedEventArgs e)
     {
         if (!IsInitialized) return;

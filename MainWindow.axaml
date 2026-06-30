@@ -28,6 +28,8 @@
                 <MenuItem Header="行进区域画刷" Tag="WalkBrush" Click="Tool_Click" />
                 <MenuItem Header="阻挡区域画刷" Tag="BlockBrush" Click="Tool_Click" />
                 <MenuItem Header="清除格子画刷" Tag="EraseBrush" Click="Tool_Click" />
+                <Separator />
+                <MenuItem Header="优化阻挡区域" Click="OptimizeBlockedRegions_Click" />
             </MenuItem>
             <MenuItem Header="视图(_V)">
                 <MenuItem Header="适应窗口" Click="Fit_Click" />

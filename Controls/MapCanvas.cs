@@ -761,23 +761,6 @@ public sealed class MapCanvas : Control
     private void BeginSelectionOrDrag(TMapPoint mapPoint, Point screenPoint)
     {
         var extendSelection = _lastKeyModifiers.HasFlag(KeyModifiers.Control);
-        if (Document.Layers.Any(layer => layer.Name == DropTargetLayer && layer.Type == TMapLayerType.Object))
-        {
-            var objectHit = HitTestObject(screenPoint, DropTargetLayer);
-            if (objectHit is null)
-            {
-                AddObject(mapPoint);
-                return;
-            }
-            if (extendSelection)
-            {
-                ToggleSelectedItem(objectHit);
-                return;
-            }
-            SelectedItem = objectHit;
-            BeginDrag(mapPoint, objectHit.X, objectHit.Y);
-            return;
-        }
         if (!extendSelection && SelectedItem is TMapSprite { IsLocked: false } selectedSprite)
         {
             var resizeHandle = HitTestResizeHandle(selectedSprite, screenPoint);
@@ -789,6 +772,12 @@ public sealed class MapCanvas : Control
         }
 
         var hit = HitTestItem(mapPoint, screenPoint);
+        if (hit is null &&
+            Document.Layers.Any(layer => layer.Name == DropTargetLayer && layer.Type == TMapLayerType.Object))
+        {
+            AddObject(mapPoint);
+            return;
+        }
         if (extendSelection)
         {
             if (hit is not null) ToggleSelectedItem(hit);
@@ -847,17 +836,6 @@ public sealed class MapCanvas : Control
                      .OrderByDescending(sprite => sprite.Order))
         {
             if (HitTestSprite(mapPoint, sprite)) return sprite;
-        }
-        return null;
-    }
-
-    private TMapObject? HitTestObject(Point screenPoint, string layerName)
-    {
-        foreach (var mapObject in Document.Objects
-                     .Where(item => !item.IsLocked && item.Layer == layerName).Reverse())
-        {
-            var point = MapToScreen(new TMapPoint(mapObject.X, mapObject.Y));
-            if (Distance(point, screenPoint) <= 10) return mapObject;
         }
         return null;
     }
