@@ -1,0 +1,5 @@
+<Project>
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'TMapEditor'">
+    <PackageReference Include="OpenTK" Version="4.9.4" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,283 @@
+<Window x:Class="TMapEditor.MainWindow"
+        xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:TMapEditor.Controls"
+        xmlns:models="clr-namespace:TMapEditor.Models"
+        Title="TMap Editor" Width="1500" Height="900" MinWidth="1100" MinHeight="650"
+        Background="#1E2024" Closing="Window_Closing" KeyDown="Window_KeyDown">
+    <Window.Resources>
+        <controls:PercentageSizeConverter x:Key="PercentageSizeConverter" />
+        <controls:ImagePathToBitmapConverter x:Key="ImagePathToBitmapConverter" />
+    </Window.Resources>
+    <DockPanel>
+        <Menu DockPanel.Dock="Top">
+            <MenuItem Header="文件(_F)">
+                <MenuItem Header="新建" Click="New_Click" />
+                <MenuItem Header="打开..." Click="Open_Click" />
+                <Separator />
+                <MenuItem Header="保存" Click="Save_Click" />
+                <MenuItem Header="另存为..." Click="SaveAs_Click" />
+                <Separator />
+                <MenuItem Header="烘焙导出..." Click="Export_Click" />
+                <Separator />
+                <MenuItem Header="退出" Click="Exit_Click" />
+            </MenuItem>
+            <MenuItem Header="编辑(_E)">
+                <MenuItem x:Name="UndoMenuItem" Header="撤销" Click="Undo_Click" IsEnabled="False" />
+                <Separator />
+                <MenuItem Header="行进区域画刷" Tag="WalkBrush" Click="Tool_Click" />
+                <MenuItem Header="阻挡区域画刷" Tag="BlockBrush" Click="Tool_Click" />
+                <MenuItem Header="清除格子画刷" Tag="EraseBrush" Click="Tool_Click" />
+                <MenuItem Header="添加对象点" Tag="Object" Click="Tool_Click" />
+            </MenuItem>
+            <MenuItem Header="视图(_V)">
+                <MenuItem Header="适应窗口" Click="Fit_Click" />
+            </MenuItem>
+        </Menu>
+
+        <Border DockPanel.Dock="Top" Background="#2B2E33" Padding="4,3">
+            <StackPanel Orientation="Horizontal">
+                <Button Content="选择/移动" Tag="Select" Click="Tool_Click" />
+                <Border Width="1" Background="#4A4F57" Margin="6,0" />
+                <CheckBox x:Name="ShowGridCheck" Content="网格" IsChecked="True" Margin="6,0"
+                          IsCheckedChanged="ViewOption_Changed" />
+                <CheckBox x:Name="ShowChunksCheck" Content="Chunk" IsChecked="False" Margin="6,0"
+                          IsCheckedChanged="ViewOption_Changed" />
+                <CheckBox x:Name="ShowWaypointsCheck" Content="路点" IsChecked="True" Margin="6,0"
+                          IsCheckedChanged="ViewOption_Changed" />
+                <CheckBox x:Name="ShowObjectsCheck" Content="对象点" IsChecked="True" Margin="6,0"
+                          IsCheckedChanged="ViewOption_Changed" />
+                <CheckBox x:Name="SnapCheck" Content="吸附网格" Margin="6,0"
+                          IsCheckedChanged="ViewOption_Changed" />
+                <Border Width="1" Background="#4A4F57" Margin="6,0" />
+                <Button Content="适应窗口" Click="Fit_Click" />
+                <TextBlock x:Name="ToolHintText" Text="选择模式：左键移动，滚轮缩放，中键/空格拖动画布" Margin="12,0" VerticalAlignment="Center" />
+            </StackPanel>
+        </Border>
+
+        <Border DockPanel.Dock="Bottom" Background="#292C31" Padding="8,4">
+            <Grid>
+                <TextBlock x:Name="StatusText" Text="就绪" />
+                <TextBlock x:Name="FileText" Text="未保存" HorizontalAlignment="Right" />
+            </Grid>
+        </Border>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="250" />
+                <ColumnDefinition Width="5" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="5" />
+                <ColumnDefinition Width="290" />
+            </Grid.ColumnDefinitions>
+
+            <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Background="{StaticResource PanelBrush}">
+                <StackPanel Margin="8">
+                    <TextBlock Text="地图设置" FontSize="16" FontWeight="SemiBold" Margin="4,6" />
+                    <UniformGrid Columns="2">
+                        <StackPanel><TextBlock Text="宽度" /><TextBox x:Name="MapWidthText" /></StackPanel>
+                        <StackPanel><TextBlock Text="高度" /><TextBox x:Name="MapHeightText" /></StackPanel>
+                        <StackPanel><TextBlock Text="网格尺寸" /><TextBox x:Name="GridSizeText" /></StackPanel>
+                        <StackPanel><TextBlock Text="Chunk 行" /><TextBox x:Name="ChunkRowsText" /></StackPanel>
+                        <StackPanel><TextBlock Text="Chunk 列" /><TextBox x:Name="ChunkColumnsText" /></StackPanel>
+                    </UniformGrid>
+                    <Button Content="应用地图设置" Click="ApplyDocument_Click" />
+
+                    <Separator Margin="0,10" />
+                    <DockPanel>
+                        <TextBlock Text="图层" FontSize="16" FontWeight="SemiBold" DockPanel.Dock="Left" />
+                    </DockPanel>
+                    <ListBox x:Name="LayerList" Height="96" SelectionChanged="LayerList_SelectionChanged">
+                        <ListBox.Styles>
+                            <Style Selector="ListBoxItem">
+                                <Setter Property="Padding" Value="8,4" />
+                                <Setter Property="MinHeight" Value="30" />
+                            </Style>
+                            <Style Selector="CheckBox">
+                                <Setter Property="Margin" Value="0,0,6,0" />
+                            </Style>
+                        </ListBox.Styles>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate x:DataType="models:TMapLayer">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <CheckBox Grid.Column="0" IsChecked="{Binding Visible, Mode=TwoWay}"
+                                              ToolTip.Tip="显示/隐藏图层"
+                                              IsCheckedChanged="LayerVisibility_Changed" />
+                                    <TextBlock Grid.Column="1" Text="{Binding Name}" VerticalAlignment="Center" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <UniformGrid Columns="3">
+                        <Button Content="新增" Click="AddLayer_Click" />
+                        <Button Content="重命名" Click="RenameLayer_Click" />
+                        <Button Content="删除" Click="DeleteLayer_Click" />
+                    </UniformGrid>
+                    <Separator Margin="0,10" />
+                    <TextBlock Text="元素视图" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,4" />
+                    <UniformGrid Columns="2" Margin="0,0,0,4">
+                        <ToggleButton x:Name="MapElementsViewButton" Content="地图元素" Tag="Map"
+                                      IsChecked="True"
+                                      Click="EntityViewButton_Click" />
+                        <ToggleButton x:Name="ObjectElementsViewButton" Content="对象元素" Tag="Object"
+                                      Click="EntityViewButton_Click" />
+                    </UniformGrid>
+                    <ListBox x:Name="EntityList" Height="330" SelectionMode="Multiple"
+                             SelectionChanged="EntityList_SelectionChanged"
+                             PointerPressed="EntityList_PointerPressed">
+                        <ListBox.Styles>
+                            <Style Selector="ListBoxItem">
+                                <Setter Property="Padding" Value="8,3" />
+                                <Setter Property="MinHeight" Value="28" />
+                            </Style>
+                        </ListBox.Styles>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate x:DataType="models:ILockableDisplayItem">
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <TextBlock Text="{Binding DisplayName}" FontSize="13"
+                                               TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                    <ToggleButton Grid.Column="1" Width="22" Height="20" Padding="0" Margin="4,0,0,0"
+                                                  FontSize="11" Content="{Binding LockIcon}"
+                                                  IsChecked="{Binding IsLocked, Mode=OneWay}"
+                                                  ToolTip.Tip="锁定后无法在画布中选中"
+                                                  Click="EntityLock_Click" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                        <ListBox.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="删除" Click="Delete_Click" />
+                            </ContextMenu>
+                        </ListBox.ContextMenu>
+                    </ListBox>
+                </StackPanel>
+            </ScrollViewer>
+
+            <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch" Background="#444850" />
+            <Border Grid.Column="2" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+                <controls:MapCanvas x:Name="EditorCanvas" />
+            </Border>
+            <GridSplitter Grid.Column="3" Width="5" HorizontalAlignment="Stretch" Background="#444850" />
+
+            <Grid Grid.Column="4" Background="{StaticResource PanelBrush}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="5" />
+                    <RowDefinition Height="260" MinHeight="150" />
+                </Grid.RowDefinitions>
+                <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" Background="{StaticResource PanelBrush}">
+                    <StackPanel Margin="10" LostFocus="SelectionProperty_LostFocus"
+                                KeyDown="SelectionProperty_KeyDown">
+                    <TextBlock Text="属性" FontSize="16" FontWeight="SemiBold" Margin="2,6" />
+                    <TextBlock x:Name="SelectionTypeText" Text="未选择" Foreground="#9EA5B0" Margin="2,0,2,10" />
+
+                    <StackPanel x:Name="CommonPropertyPanel" IsVisible="False">
+                        <TextBlock Text="名称" />
+                        <TextBox x:Name="ItemNameText" />
+                    </StackPanel>
+
+                    <StackPanel x:Name="SpritePropertyPanel" IsVisible="False">
+                        <TextBlock Text="图层" />
+                        <ComboBox x:Name="SpriteLayerCombo" SelectionChanged="SelectionProperty_SelectionChanged">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate x:DataType="models:TMapLayer">
+                                    <TextBlock Text="{Binding Name}" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                        <TextBlock Text="图片路径" />
+                        <TextBox x:Name="SpriteImagePathText" IsReadOnly="True" />
+                        <UniformGrid Columns="2">
+                            <StackPanel><TextBlock Text="X" /><TextBox x:Name="SpriteXText" /></StackPanel>
+                            <StackPanel><TextBlock Text="Y" /><TextBox x:Name="SpriteYText" /></StackPanel>
+                            <StackPanel><TextBlock Text="宽度" /><TextBox x:Name="SpriteWidthText" /></StackPanel>
+                            <StackPanel><TextBlock Text="高度" /><TextBox x:Name="SpriteHeightText" /></StackPanel>
+                            <StackPanel><TextBlock Text="旋转°" /><TextBox x:Name="SpriteRotationText" /></StackPanel>
+                            <StackPanel><TextBlock Text="顺序" /><TextBox x:Name="SpriteOrderText" /></StackPanel>
+                            <StackPanel><TextBlock Text="Scale X" /><TextBox x:Name="SpriteScaleXText" /></StackPanel>
+                            <StackPanel><TextBlock Text="Scale Y" /><TextBox x:Name="SpriteScaleYText" /></StackPanel>
+                            <StackPanel><TextBlock Text="Anchor X" /><TextBox x:Name="SpriteAnchorXText" /></StackPanel>
+                            <StackPanel><TextBlock Text="Anchor Y" /><TextBox x:Name="SpriteAnchorYText" /></StackPanel>
+                        </UniformGrid>
+                        <Button Content="重置属性" Click="ResetSpriteProperties_Click" />
+                    </StackPanel>
+
+                    <StackPanel x:Name="ObjectPropertyPanel" IsVisible="False">
+                        <TextBlock Text="Args" />
+                        <TextBox x:Name="ObjectArgsText" />
+                        <UniformGrid Columns="2">
+                            <StackPanel><TextBlock Text="X" /><TextBox x:Name="ObjectXText" /></StackPanel>
+                            <StackPanel><TextBlock Text="Y" /><TextBox x:Name="ObjectYText" /></StackPanel>
+                        </UniformGrid>
+                    </StackPanel>
+
+                    </StackPanel>
+                </ScrollViewer>
+                <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch" Background="#444850" />
+                <Border Grid.Row="2" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1,1,0,0"
+                        Background="#202328">
+                    <DockPanel Margin="8">
+                        <Grid DockPanel.Dock="Top" Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="资源" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
+                            <Button Grid.Column="1" Content="导入图片..." Click="ImportResources_Click" Margin="4,0" />
+                        </Grid>
+                        <Grid DockPanel.Dock="Top" Margin="2,0,4,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="44" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="预览缩放" VerticalAlignment="Center" Margin="0,0,8,0" />
+                            <Slider x:Name="ResourcePreviewScaleSlider" Grid.Column="1"
+                                    Minimum="50" Maximum="200" Value="100"
+                                    VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="2" TextAlignment="Right" VerticalAlignment="Center"
+                                       Text="{Binding #ResourcePreviewScaleSlider.Value, StringFormat={}{0:0}%}" />
+                        </Grid>
+                        <TextBlock DockPanel.Dock="Bottom" Text="将缩略图拖到场景中创建图片元素"
+                                   Foreground="#AEB5C0" Margin="2,6,2,0" />
+                        <ListBox x:Name="ResourceList" SelectionMode="Single"
+                                 Tag="{Binding #ResourcePreviewScaleSlider.Value}"
+                                 PointerPressed="ResourceList_PointerPressed"
+                                 PointerMoved="ResourceList_PointerMoved"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto">
+                            <ListBox.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel Orientation="Horizontal" />
+                                </ItemsPanelTemplate>
+                            </ListBox.ItemsPanel>
+                            <ListBox.ItemTemplate>
+                                <DataTemplate x:DataType="models:TMapResource">
+                                    <Border Padding="5" ToolTip.Tip="{Binding ImagePath}"
+                                            Width="{Binding $parent[ListBox].Tag,
+                                                Converter={StaticResource PercentageSizeConverter}, ConverterParameter=104}">
+                                        <StackPanel>
+                                            <Border Height="{Binding $parent[ListBox].Tag,
+                                                        Converter={StaticResource PercentageSizeConverter}, ConverterParameter=78}"
+                                                    Background="#15171A"
+                                                    BorderBrush="#4A4F57" BorderThickness="1">
+                                                <Image Source="{Binding ThumbnailPath, Converter={StaticResource ImagePathToBitmapConverter}}"
+                                                       Stretch="Uniform" Margin="3" />
+                                            </Border>
+                                            <TextBlock Text="{Binding Name}" TextAlignment="Center"
+                                                       TextTrimming="CharacterEllipsis" Margin="2,4,2,0" />
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </DockPanel>
+                </Border>
+            </Grid>
+        </Grid>
+    </DockPanel>
+</Window>

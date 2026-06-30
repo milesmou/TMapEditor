@@ -1,0 +1,17 @@
+{
+  "formatVersion": 2,
+  "name": "map1",
+  "width": 4500,
+  "height": 4002,
+  "gridSize": 32,
+  "chunkRows": 3,
+  "chunkColumns": 6,
+  "layers": [
+    { "name": "BgChunkLayer", "visible": true },
+    { "name": "FrontChunkLayer", "visible": true }
+  ],
+  "resources": [],
+  "sprites": [],
+  "cells": [],
+  "objects": []
+}

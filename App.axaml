@@ -1,0 +1,61 @@
+<Application x:Class="TMapEditor.App"
+             xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Application.Styles>
+        <FluentTheme />
+        <Style Selector="Window">
+            <Setter Property="FontFamily" Value="Inter, Microsoft YaHei UI, Segoe UI" />
+            <Setter Property="Foreground" Value="#E8E8E8" />
+        </Style>
+        <Style Selector="Menu, ContextMenu">
+            <Setter Property="Background" Value="#25282D" />
+            <Setter Property="Foreground" Value="#F2F2F2" />
+        </Style>
+        <Style Selector="TextBlock">
+            <Setter Property="Foreground" Value="#E8E8E8" />
+        </Style>
+        <Style Selector="Button">
+            <Setter Property="Margin" Value="3" />
+            <Setter Property="Padding" Value="8,4" />
+            <Setter Property="Background" Value="#34383F" />
+            <Setter Property="Foreground" Value="#F2F2F2" />
+            <Setter Property="BorderBrush" Value="#555B64" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="2" />
+        </Style>
+        <Style Selector="ToggleButton">
+            <Setter Property="Margin" Value="3" />
+            <Setter Property="Padding" Value="8,4" />
+            <Setter Property="Background" Value="#34383F" />
+            <Setter Property="Foreground" Value="#F2F2F2" />
+            <Setter Property="BorderBrush" Value="#555B64" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="2" />
+        </Style>
+        <Style Selector="TextBox">
+            <Setter Property="Margin" Value="3" />
+            <Setter Property="Padding" Value="4" />
+            <Setter Property="Background" Value="#1E2024" />
+            <Setter Property="Foreground" Value="#F2F2F2" />
+            <Setter Property="CaretBrush" Value="#FFFFFF" />
+            <Setter Property="SelectionBrush" Value="#365A82" />
+            <Setter Property="BorderBrush" Value="#555B64" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+        <Style Selector="ComboBox, ListBox">
+            <Setter Property="Background" Value="#1E2024" />
+            <Setter Property="Foreground" Value="#E8E8E8" />
+            <Setter Property="BorderBrush" Value="#3B4048" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+        <Style Selector="CheckBox">
+            <Setter Property="Foreground" Value="#E8E8E8" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+    </Application.Styles>
+
+    <Application.Resources>
+        <SolidColorBrush x:Key="PanelBrush" Color="#25282D" />
+        <SolidColorBrush x:Key="BorderBrush" Color="#3B4048" />
+    </Application.Resources>
+</Application>
