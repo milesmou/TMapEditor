@@ -38,6 +38,8 @@ dotnet run --project .\TMapEditor.csproj
 - 网格、Chunk、路点、格子 Z 和吸附网格的显示设置随工程保存并在打开时恢复
 - 导出 `chunk_row_col.png`、包含层级数据的 `Grid.json` 和独立路点文件 `GridPath.json`
 - 导出前校验全部图片引用，并清理本工具上次生成、当前已失效的 Chunk 和图层产物
+- Windows 界面固定使用 Direct3D 11（ANGLE），macOS 使用 Metal；窗口标题会显示当前界面渲染后端
+- 烘焙导出优先使用 GPU，GPU 不可用或 Chunk 超出 GPU 纹理限制时自动回退到 CPU
 
 ## 操作
 
@@ -66,5 +68,7 @@ dotnet run --project .\TMapEditor.csproj
 ```
 
 成功时进程退出码为 `0`，参数错误为 `2`，读取或导出失败为 `1`。使用 `dotnet TMapEditor.dll` 执行相同参数时可直接看到导出结果或错误信息。
+
+导出完成信息末尾会显示本次烘焙实际使用 `GPU` 还是 `CPU`。命令行模式同样会优先创建 GPU 上下文，创建失败时自动使用 CPU。
 
 图片路径在保存时相对于 `.tmap` 文件保存。建议把 `.tmap` 和素材目录放在同一个地图工程目录中，便于整体移动。

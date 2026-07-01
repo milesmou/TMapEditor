@@ -7,7 +7,7 @@
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `formatVersion` | number | 当前固定为 `2`；不兼容 v1 多边形区域格式 |
-| `name` | string | 地图名称 |
+| `name` | string | 地图名称；打开或保存时会同步为 `.tmap` 文件名（不含扩展名） |
 | `width` / `height` | number | 地图尺寸 |
 | `gridSize` | number | 行走网格边长 |
 | `chunkRows` / `chunkColumns` | number | 静态图切块数量 |
@@ -44,7 +44,7 @@
   "id": "9eb63002-26ad-4e4f-b370-ac64d10c43d8",
   "name": "bridge",
   "layer": "BgChunkLayer",
-  "imagePath": "art/bridge.png",
+  "imagePath": "Resources/bridge.png",
   "x": 120.34,
   "y": -68.189,
   "width": 802,
@@ -83,7 +83,7 @@
 }
 ```
 
-对象通过 `layer` 保存所属对象层，同时保存名称、坐标、`z` 与编辑器显示颜色 `displayColor`（`#RRGGBB` 或 `#AARRGGBB`）。导出时编辑器计算其 `row`、`col`、`chunkRow` 和 `chunkCol`，并写入对应对象层的 `Objects`；显示颜色不影响导出数据。对象点和对象层图片都按 `z` 从小到大导出。对象层图片写入同层的 `Images`，每项包含元素名称、导出图片文件名及地图坐标。
+对象通过 `layer` 保存所属对象层，同时保存名称、坐标、`z`、字符串参数 `args` 与编辑器显示颜色 `displayColor`（`#RRGGBB` 或 `#AARRGGBB`）。导出时编辑器计算其 `row`、`col`、`chunkRow` 和 `chunkCol`，并写入对应对象层的 `Objects`；非空 `args` 去除首尾空白后导出为 `Args`，空参数不写入。显示颜色不影响导出数据。对象点和对象层图片都按 `z` 从小到大导出。对象层图片写入同层的 `Images`，每项包含元素名称、导出图片文件名、地图坐标和 `Z`。
 
 图片元素和对象元素可包含布尔字段 `isLocked`；该字段只控制编辑器中的画布选中行为，不影响烘焙结果。旧文件未包含此字段时按未锁定处理。
 
@@ -102,12 +102,21 @@
 - 所有对象层集中在 `Grid.json` 的 `ObjectLayers` 对象中。每个层级包含 `Objects` 和 `Images` 两个数组，即使没有对应元素也会保留空数组。
 - 对象层中的图片不会参与 Chunk 烘焙；其原图复制到 `<对象层名称>/images/` 并保留扩展名，`Images[].File` 保存不带扩展名的文件名。同一源图片在同一对象层只复制一次，重名文件会自动追加编号。
 - 路点数据独立写入 `GridPath.json`。`WalkableCells` 与 `BlockedCells` 两类都有内容时只导出数量较少的一类；数量相同时导出 `WalkableCells`。只有一类有内容时导出该类。非零格子 Z 独立写入 `ZCells`，每项格式为 `[Row, Col, Z]`，不受通行状态精简规则影响。
-- 导出文件只记录 `TmapFile`，不包含 Cocos Scene 引用。
+- `Grid.json` 和 `GridPath.json` 都记录生成时间 `GeneratedAt`、源文件名 `TmapFile` 与导出类型 `ExportType`，不包含 Cocos Scene 引用。
 
 `Grid.json` 的关键结构如下：
 
 ```json
 {
+  "GeneratedAt": "2026-07-01T02:30:00.0000000Z",
+  "TmapFile": "map1.tmap",
+  "ExportType": "grid",
+  "GridSize": 32,
+  "Rows": 126,
+  "Columns": 141,
+  "ChunkRows": 3,
+  "ChunkColumns": 6,
+  "OriginMode": "sourceLayerLeftBottom",
   "MapWidth": 4500,
   "MapHeight": 4002,
   "Layers": [
@@ -122,7 +131,7 @@
   "ObjectLayers": {
     "Npc": {
       "Objects": [
-        { "Name": "Npc_1", "Row": 4, "Col": 8, "ChunkRow": 0, "ChunkCol": 0, "Z": 5 }
+        { "Name": "Npc_1", "Row": 4, "Col": 8, "ChunkRow": 0, "ChunkCol": 0, "Z": 5, "Args": "vendor" }
       ],
       "Images": [
         { "Name": "Tree_1", "File": "tree", "X": 1200, "Y": 860, "Z": 10 }
@@ -136,6 +145,15 @@
 
 ```json
 {
+  "GeneratedAt": "2026-07-01T02:30:00.0000000Z",
+  "TmapFile": "map1.tmap",
+  "ExportType": "gridPath",
+  "GridSize": 32,
+  "Rows": 126,
+  "Columns": 141,
+  "OriginMode": "sourceLayerLeftBottom",
+  "MapWidth": 4500,
+  "MapHeight": 4002,
   "WalkableCells": [[3, 8]],
   "ZCells": [[3, 8, 10], [3, 9, 10]]
 }
