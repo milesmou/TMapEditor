@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Globalization;
+using System.Reflection;
 using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
@@ -8,6 +9,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media.Imaging;
+using Avalonia.Platform;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -34,6 +36,7 @@ public partial class MainWindow : Window
     private string _currentSnapshot = "";
     private readonly DispatcherTimer _objectColorCommitTimer = new() { Interval = TimeSpan.FromMilliseconds(250) };
     private bool _objectColorChangePending;
+    private string _renderBackend = "检测中";
 
     public MainWindow()
     {
@@ -54,7 +57,12 @@ public partial class MainWindow : Window
         EditorCanvas.DocumentChanged += EditorCanvas_DocumentChanged;
         EditorCanvas.HoveredCellChanged += EditorCanvas_HoveredCellChanged;
         OpenLastProjectOrCreateDocument();
-        Loaded += (_, _) => EditorCanvas.FitToView();
+        Loaded += (_, _) =>
+        {
+            _renderBackend = GetRenderBackendName();
+            UpdateWindowTitle();
+            EditorCanvas.FitToView();
+        };
     }
 
     private void OpenLastProjectOrCreateDocument()
@@ -1141,7 +1149,48 @@ public partial class MainWindow : Window
     {
         _dirty = dirty;
         if (dirty && !_restoringUndo) RefreshCurrentSnapshot();
-        Title = $"TMap Editor - {_document.Name}{(dirty ? " *" : "")}";
+        UpdateWindowTitle();
+    }
+
+    private void UpdateWindowTitle()
+    {
+        Title = $"TMap Editor - {_document.Name}{(_dirty ? " *" : "")} [{_renderBackend}]";
+    }
+
+    private string GetRenderBackendName()
+    {
+        if (OperatingSystem.IsWindows()) return "Direct3D 11 (ANGLE)";
+        if (OperatingSystem.IsMacOS()) return "Metal";
+
+        var renderer = typeof(TopLevel)
+            .GetProperty("Renderer", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            ?.GetValue(this);
+        var graphics = FindPlatformGraphics(renderer, 3);
+        var typeName = graphics?.GetType().FullName ?? "";
+
+        if (typeName.Contains("D3D11", StringComparison.OrdinalIgnoreCase)) return "Direct3D 11 (ANGLE)";
+        if (typeName.Contains("D3D9", StringComparison.OrdinalIgnoreCase)) return "Direct3D 9 (ANGLE)";
+        if (typeName.Contains("Vulkan", StringComparison.OrdinalIgnoreCase)) return "Vulkan";
+        if (typeName.Contains("Wgl", StringComparison.OrdinalIgnoreCase) ||
+            typeName.Contains("OpenGl", StringComparison.OrdinalIgnoreCase) ||
+            typeName.Contains("Egl", StringComparison.OrdinalIgnoreCase)) return "OpenGL";
+        if (typeName.Contains("Metal", StringComparison.OrdinalIgnoreCase)) return "Metal";
+        return graphics is null ? "未知渲染后端" : graphics.GetType().Name;
+    }
+
+    private static IPlatformGraphics? FindPlatformGraphics(object? value, int depth)
+    {
+        if (value is IPlatformGraphics graphics) return graphics;
+        if (value is null || depth == 0) return null;
+
+        foreach (var field in value.GetType()
+                     .GetFields(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public))
+        {
+            var result = FindPlatformGraphics(field.GetValue(value), depth - 1);
+            if (result is not null) return result;
+        }
+
+        return null;
     }
 
     private void SaveDocumentToPath(string filePath)
