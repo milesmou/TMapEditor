@@ -127,6 +127,7 @@ public sealed class TMapObject : ILockableDisplayItem
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = "Object";
+    public string Note { get; set; } = "";
     public string Layer { get; set; } = "";
     public string Args { get; set; } = "";
     public double X { get; set; }
@@ -136,7 +137,9 @@ public sealed class TMapObject : ILockableDisplayItem
     public bool IsLocked { get; set; }
 
     [JsonIgnore]
-    public string DisplayName => $"◆ {Name}";
+    public string DisplayName => string.IsNullOrWhiteSpace(Note)
+        ? $"◆ {Name}"
+        : $"◆ {Name} ({Note.Trim()})";
 
     [JsonIgnore]
     public string LockIcon => IsLocked ? "🔒" : "🔓";

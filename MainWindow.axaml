@@ -9,7 +9,7 @@
         <controls:PercentageSizeConverter x:Key="PercentageSizeConverter" />
         <controls:ImagePathToBitmapConverter x:Key="ImagePathToBitmapConverter" />
     </Window.Resources>
-    <DockPanel>
+    <DockPanel x:Name="RootLayout" Focusable="True">
         <Menu DockPanel.Dock="Top">
             <MenuItem Header="文件(_F)">
                 <MenuItem Header="新建" Click="New_Click" />
@@ -244,6 +244,8 @@
                                 </DataTemplate>
                             </ComboBox.ItemTemplate>
                         </ComboBox>
+                        <TextBlock Text="备注" />
+                        <TextBox x:Name="ObjectNoteText" />
                         <TextBlock Text="Args" />
                         <TextBox x:Name="ObjectArgsText" />
                         <TextBlock Text="显示颜色" />

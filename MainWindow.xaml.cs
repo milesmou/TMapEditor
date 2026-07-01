@@ -51,6 +51,10 @@ public partial class MainWindow : Window
             PointerMovedEvent,
             ResourceList_PointerMoved,
             handledEventsToo: true);
+        AddHandler(
+            PointerPressedEvent,
+            Window_PointerPressed,
+            handledEventsToo: true);
         ResourcePreviewScaleSlider.Value = Math.Clamp(_settings.ResourcePreviewScale, 50, 200);
         EditorCanvas.SelectedItemChanged += EditorCanvas_SelectedItemChanged;
         EditorCanvas.DocumentChanging += EditorCanvas_DocumentChanging;
@@ -318,7 +322,7 @@ public partial class MainWindow : Window
         return true;
     }
 
-    private void ApplySelectionProperties()
+    private void ApplySelectionProperties(bool deferEntityRefresh = false)
     {
         try
         {
@@ -351,6 +355,7 @@ public partial class MainWindow : Window
                     mapObject.Layer = selectedObjectLayer?.Name ?? mapObject.Layer;
                     if (selectedObjectLayer is not null && !ReferenceEquals(LayerList.SelectedItem, selectedObjectLayer))
                         LayerList.SelectedItem = selectedObjectLayer;
+                    mapObject.Note = ObjectNoteText.Text?.Trim() ?? "";
                     mapObject.Args = ObjectArgsText.Text?.Trim() ?? "";
                     mapObject.DisplayColor = FormatDisplayColor(ObjectDisplayColorPicker.Color);
                     mapObject.X = ParseDouble(ObjectXText.Text, "X");
@@ -361,7 +366,10 @@ public partial class MainWindow : Window
                     return;
             }
             SetDirty(true);
-            RefreshEntityList();
+            if (deferEntityRefresh)
+                Dispatcher.UIThread.Post(RefreshEntityList, DispatcherPriority.Background);
+            else
+                RefreshEntityList();
             EditorCanvas.InvalidateVisual();
             StatusText.Text = "属性已自动应用";
         }
@@ -374,7 +382,19 @@ public partial class MainWindow : Window
     private void SelectionProperty_LostFocus(object sender, RoutedEventArgs e)
     {
         if (_updatingSelectionProperties || e.Source is not TextBox) return;
-        ApplySelectionProperties();
+        ApplySelectionProperties(deferEntityRefresh: true);
+    }
+
+    private void Window_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        var focusManager = TopLevel.GetTopLevel(this)?.FocusManager;
+        if (focusManager?.GetFocusedElement() is not TextBox focusedTextBox) return;
+
+        var source = e.Source as Visual;
+        if (ReferenceEquals(source, focusedTextBox) ||
+            ReferenceEquals(source?.FindAncestorOfType<TextBox>(), focusedTextBox)) return;
+
+        RootLayout.Focus();
     }
 
     private void SelectionProperty_KeyDown(object sender, KeyEventArgs e)
@@ -937,6 +957,7 @@ public partial class MainWindow : Window
                     SelectionTypeText.Text = "地图对象";
                     ItemNameText.Text = mapObject.Name;
                     ObjectLayerCombo.SelectedItem = _document.Layers.FirstOrDefault(layer => layer.Name == mapObject.Layer);
+                    ObjectNoteText.Text = mapObject.Note;
                     ObjectArgsText.Text = mapObject.Args;
                     ObjectDisplayColorPicker.Color = ParseDisplayColor(mapObject.DisplayColor);
                     ObjectXText.Text = Format(mapObject.X);
