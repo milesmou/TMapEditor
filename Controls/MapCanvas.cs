@@ -558,7 +558,7 @@ public sealed class MapCanvas : Control
         var brush = new SolidColorBrush(ParseDisplayColor(mapObject.DisplayColor));
         var outline = _selectedItems.Contains(mapObject) ? Brushes.Yellow : Brushes.White;
         dc.DrawEllipse(brush, new Pen(outline, _selectedItems.Contains(mapObject) ? 2 : 1), point, 6, 6);
-        dc.DrawText(CreateText(mapObject.Name, 12), new Point(point.X + 8, point.Y - 17));
+        dc.DrawText(CreateText(mapObject.Label, 12), new Point(point.X + 8, point.Y - 17));
     }
 
     private static Color ParseDisplayColor(string? value)
