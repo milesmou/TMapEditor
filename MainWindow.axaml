@@ -18,7 +18,7 @@
                 <MenuItem Header="保存" Click="Save_Click" />
                 <MenuItem Header="另存为..." Click="SaveAs_Click" />
                 <Separator />
-                <MenuItem Header="烘焙导出..." Click="Export_Click" />
+                <MenuItem Header="导出..." Click="Export_Click" />
                 <Separator />
                 <MenuItem Header="退出" Click="Exit_Click" />
             </MenuItem>
