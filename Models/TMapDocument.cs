@@ -22,6 +22,7 @@ public sealed class TMapDocument
     public double GridSize { get; set; } = 32;
     public int ChunkRows { get; set; } = 3;
     public int ChunkColumns { get; set; } = 6;
+    public TMapIndexOrigin IndexOrigin { get; set; } = TMapIndexOrigin.LeftTop;
     public TMapViewSettings ViewSettings { get; set; } = new();
     public List<TMapLayer> Layers { get; set; } = [];
     public List<TMapSprite> Sprites { get; set; } = [];
@@ -37,6 +38,12 @@ public sealed class TMapDocument
     public string BaseDirectory => FilePath is null
         ? Environment.CurrentDirectory
         : Path.GetDirectoryName(FilePath) ?? Environment.CurrentDirectory;
+}
+
+public enum TMapIndexOrigin
+{
+    LeftTop,
+    LeftBottom
 }
 
 public sealed class TMapViewSettings

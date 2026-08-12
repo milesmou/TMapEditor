@@ -11,6 +11,7 @@
 | `width` / `height` | number | 地图尺寸 |
 | `gridSize` | number | 行走网格边长 |
 | `chunkRows` / `chunkColumns` | number | 静态图切块数量 |
+| `indexOrigin` | string | 状态栏与导出索引原点，`LeftTop` 或 `LeftBottom` |
 | `viewSettings` | object | 工程视图设置 |
 | `layers` | array | 图片层和对象层 |
 | `resources` | array | 工程图片资源 |
@@ -63,7 +64,7 @@
 
 ## 格子与对象
 
-只有被画刷设置过的格子才会写入 `cells`。同一行列只允许一条记录，重新绘制会直接覆盖状态：
+`.tmap` 中的格子固定以地图左下角为 `[0,0]` 存档，列索引向右增加、行索引向上增加。`indexOrigin` 不改变存档数据，只控制状态栏显示和导出时的行号转换：`LeftTop` 时导出行索引向下增加，`LeftBottom` 时保持向上增加。只有被画刷设置过的格子才会写入 `cells`。同一行列只允许一条记录，重新绘制会直接覆盖状态：
 
 ```json
 {
@@ -91,7 +92,7 @@
 
 ## 导出规则
 
-- Chunk 原点为地图左下角，命名为 `chunk_row_col.png`。
+- Chunk 使用工程的 `indexOrigin`，命名为 `chunk_row_col.png`。
 - 只有被图片覆盖的 Chunk 才写入 PNG，并记录到 `Grid.json` 的 `ImageLayers` 对应图片层数组中。
 - 导出前会校验所有图片引用；文件缺失或无法解码时终止导出，不写入新的导出结果。
 - 再次导出会清理本工具识别到的旧 Chunk，以及已经从工程删除的图层产物；输出目录中的其他文件不会被删除。
@@ -116,7 +117,7 @@
   "Columns": 141,
   "ChunkRows": 3,
   "ChunkColumns": 6,
-  "OriginMode": "sourceLayerLeftBottom",
+  "OriginMode": "sourceLayerLeftTop",
   "MapWidth": 4500,
   "MapHeight": 4002,
   "Layers": [
@@ -151,7 +152,7 @@
   "GridSize": 32,
   "Rows": 126,
   "Columns": 141,
-  "OriginMode": "sourceLayerLeftBottom",
+  "OriginMode": "sourceLayerLeftTop",
   "MapWidth": 4500,
   "MapHeight": 4002,
   "WalkableCells": [[3, 8]],

@@ -101,6 +101,7 @@ public partial class MainWindow : Window
         GridSizeText.Text = Format(document.GridSize);
         ChunkRowsText.Text = document.ChunkRows.ToString(CultureInfo.InvariantCulture);
         ChunkColumnsText.Text = document.ChunkColumns.ToString(CultureInfo.InvariantCulture);
+        IndexOriginCombo.SelectedIndex = document.IndexOrigin == TMapIndexOrigin.LeftBottom ? 1 : 0;
         RestoreViewOptions(document.ViewSettings);
         RefreshEntityList();
         UpdateSelectionProperties(null);
@@ -299,6 +300,11 @@ public partial class MainWindow : Window
         await ApplyDocumentSettings(showErrors: true);
     }
 
+    private void IndexOriginCombo_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        EditorCanvas?.RefreshHoveredCell();
+    }
+
     private async Task<bool> ApplyDocumentSettings(bool showErrors)
     {
         if (!TryDouble(MapWidthText.Text, out var width) || width <= 0 ||
@@ -316,6 +322,9 @@ public partial class MainWindow : Window
         _document.GridSize = gridSize;
         _document.ChunkRows = chunkRows;
         _document.ChunkColumns = chunkColumns;
+        _document.IndexOrigin = IndexOriginCombo.SelectedIndex == 1
+            ? TMapIndexOrigin.LeftBottom
+            : TMapIndexOrigin.LeftTop;
         SetDirty(true);
         EditorCanvas.InvalidateVisual();
         StatusText.Text = "地图设置已应用";
@@ -920,7 +929,13 @@ public partial class MainWindow : Window
             TMapCellState.Block => "阻挡",
             _ => "未设置",
         };
-        StatusText.Text = $"格子索引：[{e.Row},{e.Column}]，通行：{state}，Z：{z}";
+        var displayRow = e.Row;
+        if (displayRow.HasValue && IndexOriginCombo.SelectedIndex == 0)
+        {
+            var rows = (int)Math.Ceiling(_document.Height / _document.GridSize);
+            displayRow = rows - 1 - displayRow.Value;
+        }
+        StatusText.Text = $"格子索引：[{displayRow},{e.Column}]，通行：{state}，Z：{z}";
     }
 
     private void UpdateSelectionProperties(object? item)

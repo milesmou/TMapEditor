@@ -75,7 +75,8 @@ public static class TMapExporter
         var chunkWidth = document.Width / document.ChunkColumns;
         var chunkHeight = document.Height / document.ChunkRows;
         var originX = -document.Width / 2;
-        var originY = -document.Height / 2;
+        var isTopOrigin = document.IndexOrigin == TMapIndexOrigin.LeftTop;
+        var originY = isTopOrigin ? document.Height / 2 : -document.Height / 2;
         var sprites = document.Sprites
             .Where(sprite => sprite.Layer == layer.Name)
             .OrderBy(sprite => sprite.Order)
@@ -88,7 +89,7 @@ public static class TMapExporter
             for (var column = 0; column < document.ChunkColumns; column++)
             {
                 var x = originX + column * chunkWidth;
-                var y = originY + row * chunkHeight;
+                var y = isTopOrigin ? originY - (row + 1) * chunkHeight : originY + row * chunkHeight;
                 var chunkSprites = sprites
                     .Where(sprite => SpriteIntersectsChunk(sprite.Bounds, x, y, chunkWidth, chunkHeight))
                     .ToList();
@@ -163,17 +164,19 @@ public static class TMapExporter
         IReadOnlyList<KeyValuePair<string, List<TMapExportChunkManifest>>> imageLayers)
     {
         var originX = -document.Width / 2;
-        var originY = -document.Height / 2;
+        var isTopOrigin = document.IndexOrigin == TMapIndexOrigin.LeftTop;
+        var originY = isTopOrigin ? document.Height / 2 : -document.Height / 2;
         var columns = (int)Math.Ceiling(document.Width / document.GridSize);
         var rows = (int)Math.Ceiling(document.Height / document.GridSize);
         var allWalkableCells = document.Cells.Where(cell => cell.State == TMapCellState.Walk)
-            .OrderBy(cell => cell.Row).ThenBy(cell => cell.Column)
-            .Select(cell => new[] { cell.Row, cell.Column }).ToList();
+            .Select(cell => new[] { GetExportRow(document, rows, cell.Row), cell.Column })
+            .OrderBy(cell => cell[0]).ThenBy(cell => cell[1]).ToList();
         var allBlockedCells = document.Cells.Where(cell => cell.State == TMapCellState.Block)
-            .OrderBy(cell => cell.Row).ThenBy(cell => cell.Column)
-            .Select(cell => new[] { cell.Row, cell.Column }).ToList();
-        var zCells = document.CellZs.OrderBy(cell => cell.Row).ThenBy(cell => cell.Column)
-            .Select(cell => new[] { cell.Row, cell.Column, cell.Z }).ToList();
+            .Select(cell => new[] { GetExportRow(document, rows, cell.Row), cell.Column })
+            .OrderBy(cell => cell[0]).ThenBy(cell => cell[1]).ToList();
+        var zCells = document.CellZs
+            .Select(cell => new[] { GetExportRow(document, rows, cell.Row), cell.Column, cell.Z })
+            .OrderBy(cell => cell[0]).ThenBy(cell => cell[1]).ToList();
         var (walkableCells, blockedCells) = SelectCellLayerToExport(allWalkableCells, allBlockedCells);
 
         var chunkWidth = document.Width / document.ChunkColumns;
@@ -183,13 +186,15 @@ public static class TMapExporter
             var objects = document.Objects.Where(mapObject => mapObject.Layer == layer.Name).Select(mapObject =>
             {
                 var column = (int)Math.Floor((mapObject.X - originX) / document.GridSize);
-                var row = (int)Math.Floor((mapObject.Y - originY) / document.GridSize);
+                var row = (int)Math.Floor((isTopOrigin ? originY - mapObject.Y : mapObject.Y - originY) /
+                                          document.GridSize);
                 if (column < 0 || column >= columns || row < 0 || row >= rows) return null;
                 return new TMapExportObjectManifest(
                     mapObject.Name,
                     row,
                     column,
-                    Math.Clamp((int)Math.Floor((mapObject.Y - originY) / chunkHeight), 0, document.ChunkRows - 1),
+                    Math.Clamp((int)Math.Floor((isTopOrigin ? originY - mapObject.Y : mapObject.Y - originY) /
+                                              chunkHeight), 0, document.ChunkRows - 1),
                     Math.Clamp((int)Math.Floor((mapObject.X - originX) / chunkWidth), 0, document.ChunkColumns - 1),
                     mapObject.Z,
                     string.IsNullOrWhiteSpace(mapObject.Args) ? null : mapObject.Args.Trim());
@@ -209,7 +214,7 @@ public static class TMapExporter
             columns,
             document.ChunkRows,
             document.ChunkColumns,
-            "sourceLayerLeftBottom",
+            GetOriginMode(document),
             document.Width,
             document.Height);
         var pathManifest = new TMapExportGridPathManifest(
@@ -219,7 +224,7 @@ public static class TMapExporter
             document.GridSize,
             rows,
             columns,
-            "sourceLayerLeftBottom",
+            GetOriginMode(document),
             document.Width,
             document.Height,
             walkableCells,
@@ -289,6 +294,14 @@ public static class TMapExporter
             ? (walkableCells, null)
             : (null, blockedCells);
     }
+
+    private static string GetOriginMode(TMapDocument document) =>
+        document.IndexOrigin == TMapIndexOrigin.LeftTop
+            ? "sourceLayerLeftTop"
+            : "sourceLayerLeftBottom";
+
+    private static int GetExportRow(TMapDocument document, int rows, int storedRow) =>
+        document.IndexOrigin == TMapIndexOrigin.LeftTop ? rows - 1 - storedRow : storedRow;
 
     private static SpriteExportItem CreateSpriteExportItem(TMapSprite sprite)
     {
@@ -553,7 +566,7 @@ public static class TMapExporter
             using var json = JsonDocument.Parse(File.ReadAllText(manifestPath));
             var root = json.RootElement;
             return root.TryGetProperty("originMode", out var originMode) &&
-                   originMode.GetString() == "sourceLayerLeftBottom" &&
+                   originMode.GetString() is "sourceLayerLeftBottom" or "sourceLayerLeftTop" &&
                    root.TryGetProperty("chunks", out var chunks) && chunks.ValueKind == JsonValueKind.Array;
         }
         catch (JsonException)

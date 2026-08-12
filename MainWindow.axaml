@@ -93,6 +93,14 @@
                         <UniformGrid Columns="2">
                             <StackPanel><TextBlock Text="宽度" /><TextBox x:Name="MapWidthText" /></StackPanel>
                             <StackPanel><TextBlock Text="高度" /><TextBox x:Name="MapHeightText" /></StackPanel>
+                            <StackPanel>
+                                <TextBlock Text="索引原点" />
+                                <ComboBox x:Name="IndexOriginCombo" SelectedIndex="0"
+                                          SelectionChanged="IndexOriginCombo_SelectionChanged">
+                                    <ComboBoxItem Content="左上" />
+                                    <ComboBoxItem Content="左下" />
+                                </ComboBox>
+                            </StackPanel>
                             <StackPanel><TextBlock Text="网格尺寸" /><TextBox x:Name="GridSizeText" /></StackPanel>
                             <StackPanel><TextBlock Text="Chunk 行" /><TextBox x:Name="ChunkRowsText" /></StackPanel>
                             <StackPanel><TextBlock Text="Chunk 列" /><TextBox x:Name="ChunkColumnsText" /></StackPanel>

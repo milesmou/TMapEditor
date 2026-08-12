@@ -1255,6 +1255,9 @@ public sealed class MapCanvas : Control
         HoveredCellChanged?.Invoke(this, new MapCellHoverEventArgs(row, column));
     }
 
+    public void RefreshHoveredCell() =>
+        HoveredCellChanged?.Invoke(this, new MapCellHoverEventArgs(_hoveredRow, _hoveredColumn));
+
     private TMapPoint Snap(TMapPoint point)
     {
         if (!SnapToGrid || Document.GridSize <= 0) return point;
