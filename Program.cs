@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Aprillz.MewUI;
 using Aprillz.MewUI.Skia.Interop;
 using TMapEditor.Services;
@@ -12,7 +11,13 @@ internal static class Program
     {
         if (args.Any(argument => argument.Equals("--export", StringComparison.OrdinalIgnoreCase)))
         {
-            return RunExportCommand(args);
+            return CommandLineExportService.Run(args);
+        }
+
+        using var singleInstance = SingleInstanceGuard.TryAcquire();
+        if (singleInstance is null)
+        {
+            return 0;
         }
 
         if (OperatingSystem.IsWindows())
@@ -34,51 +39,38 @@ internal static class Program
 
         ThemeManager.Default = ThemeVariant.Dark;
         ThemeManager.DefaultAccentColor = new Color(0, 180, 255);
-        Application.Run(new MainWindow());
-        return 0;
-    }
+        var mainWindow = new MainWindow();
+        var pendingActivation = 0;
 
-    private static int RunExportCommand(IReadOnlyList<string> arguments)
-    {
-        try
+        void RestoreAndActivate()
         {
-            var exportIndex = IndexOf(arguments, "--export");
-            var outputIndex = IndexOf(arguments, "--output");
-            if (exportIndex < 0 || exportIndex + 1 >= arguments.Count ||
-                outputIndex < 0 || outputIndex + 1 >= arguments.Count)
+            var dispatcher = Application.Current?.Dispatcher;
+            if (dispatcher is null)
             {
-                Console.Error.WriteLine(
-                    "用法: TMapEditor.exe --export <地图.tmap> --output <输出目录>");
-                return 2;
+                Interlocked.Exchange(ref pendingActivation, 1);
+                return;
             }
 
-            var inputPath = Path.GetFullPath(arguments[exportIndex + 1]);
-            var outputDirectory = Path.GetFullPath(arguments[outputIndex + 1]);
-            var document = TMapFileService.Load(inputPath);
-            using var gpuContext = SkiaGpuContext.TryCreate();
-            var result = Task.Run(() =>
-                    TMapExporter.Export(document, outputDirectory, gpuContext, false))
-                .GetAwaiter().GetResult();
-            Console.WriteLine(
-                $"导出完成: {result.ChunkCount} chunks, {result.WalkableCount} 可行走格, " +
-                $"{result.BlockedCount} 阻挡格, {result.ObjectCount} 对象, " +
-                $"{result.DynamicImageCount} 动态图片, " +
-                $"渲染: {(result.HardwareAccelerated ? "GPU" : "CPU")}");
-            return 0;
-        }
-        catch (Exception exception)
-        {
-            Console.Error.WriteLine($"导出失败: {exception.Message}");
-            return 1;
-        }
-    }
+            dispatcher.BeginInvoke(DispatcherPriority.Input, () =>
+            {
+                if (mainWindow.WindowState == Aprillz.MewUI.Controls.WindowState.Minimized)
+                {
+                    mainWindow.Restore();
+                }
 
-    private static int IndexOf(IReadOnlyList<string> arguments, string option)
-    {
-        for (var index = 0; index < arguments.Count; index++)
-        {
-            if (arguments[index].Equals(option, StringComparison.OrdinalIgnoreCase)) return index;
+                mainWindow.Activate();
+            });
         }
-        return -1;
+
+        mainWindow.Loaded += () =>
+        {
+            if (Interlocked.Exchange(ref pendingActivation, 0) != 0)
+            {
+                RestoreAndActivate();
+            }
+        };
+        singleInstance.ListenForActivation(RestoreAndActivate);
+        Application.Run(mainWindow);
+        return 0;
     }
 }

@@ -8,33 +8,6 @@ using TMapEditor.Services;
 
 namespace TMapEditor.Controls;
 
-public enum EditorTool
-{
-    Select,
-    WalkBrush,
-    BlockBrush,
-    EraseBrush,
-    CellZBrush,
-    EraseCellZBrush
-}
-
-[Flags]
-internal enum ResizeHandle
-{
-    None = 0,
-    Left = 1,
-    Right = 2,
-    Bottom = 4,
-    Top = 8
-}
-
-public sealed class MapCellHoverEventArgs(int? row, int? column) : EventArgs
-{
-    public int? Row { get; } = row;
-    public int? Column { get; } = column;
-    public bool IsInsideMap => Row.HasValue && Column.HasValue;
-}
-
 public sealed class MapCanvas : SkiaCanvasView
 {
     private static readonly SKTypeface UiTypeface = CreateUiTypeface();
@@ -557,8 +530,8 @@ public sealed class MapCanvas : SkiaCanvasView
         {
             if (IsCellBrushTool())
             {
-                window?.CaptureMouse(this);
                 BeginRectangleCellBrush(ScreenToMap(_lastScreenPoint));
+                if (_isRectangleBrushing) window?.CaptureMouse(this);
                 e.Handled = true;
                 return;
             }
@@ -575,7 +548,6 @@ public sealed class MapCanvas : SkiaCanvasView
         }
 
         if (!e.LeftButton) return;
-        window?.CaptureMouse(this);
         var mapPoint = ScreenToMap(_lastScreenPoint);
         switch (Tool)
         {
@@ -585,9 +557,11 @@ public sealed class MapCanvas : SkiaCanvasView
             case EditorTool.CellZBrush:
             case EditorTool.EraseCellZBrush:
                 BeginContinuousCellBrush(mapPoint);
+                if (_isContinuousBrushing) window?.CaptureMouse(this);
                 break;
             default:
                 BeginSelectionOrDrag(mapPoint, _lastScreenPoint, e.Modifiers.HasFlag(ModifierKeys.Control));
+                if (_isDragging || _isResizing) window?.CaptureMouse(this);
                 break;
         }
         e.Handled = true;
