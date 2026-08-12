@@ -1,8 +1,8 @@
-using Avalonia;
-using Avalonia.Controls;
-using Avalonia.Input;
-using Avalonia.Media;
-using Avalonia.Media.Imaging;
+using Aprillz.MewUI;
+using Aprillz.MewUI.Controls;
+using Aprillz.MewUI.Platform;
+using Aprillz.MewUI.Skia.Controls;
+using SkiaSharp;
 using TMapEditor.Models;
 using TMapEditor.Services;
 
@@ -35,10 +35,12 @@ public sealed class MapCellHoverEventArgs(int? row, int? column) : EventArgs
     public bool IsInsideMap => Row.HasValue && Column.HasValue;
 }
 
-public sealed class MapCanvas : Control
+public sealed class MapCanvas : SkiaCanvasView
 {
-    private readonly Dictionary<string, Bitmap> _bitmapCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly SKTypeface UiTypeface = CreateUiTypeface();
+    private readonly Dictionary<string, SKBitmap> _bitmapCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<object> _selectedItems = [];
+    private readonly ContextMenu _elementContextMenu;
     private TMapDocument _document = new();
     private object? _selectedItem;
     private EditorTool _tool;
@@ -66,22 +68,28 @@ public sealed class MapCanvas : Control
     private bool _isContinuousBrushing;
     private bool _isRectangleBrushing;
     private bool _brushChanged;
-    private readonly ContextMenu _elementContextMenu;
-    private KeyModifiers _lastKeyModifiers;
-    private bool _isSpaceDown;
     private bool _activePointerEditChanged;
+    private TMapResource? _resourceDropPreview;
+    private TMapPoint? _resourceDropPreviewPoint;
 
     public MapCanvas()
     {
         Focusable = true;
-        ClipToBounds = true;
-        Cursor = new Cursor(StandardCursorType.Arrow);
-        var deleteItem = new MenuItem { Header = "删除" };
-        deleteItem.Click += (_, _) => DeleteSelected();
-        _elementContextMenu = new ContextMenu { ItemsSource = new[] { deleteItem } };
-        DragDrop.SetAllowDrop(this, true);
-        AddHandler(DragDrop.DragOverEvent, OnCanvasDragOver, handledEventsToo: true);
-        AddHandler(DragDrop.DropEvent, OnCanvasDrop, handledEventsToo: true);
+        ContinuousAnimation = false;
+        Cursor = CursorType.Arrow;
+        AllowDrop = true;
+        var deleteItem = new ContextMenu();
+        deleteItem.AddItem("删除", DeleteSelected);
+        _elementContextMenu = deleteItem;
+        MouseDown += OnCanvasMouseDown;
+        MouseMove += OnCanvasMouseMove;
+        MouseUp += OnCanvasMouseUp;
+        MouseWheel += OnCanvasMouseWheel;
+        MouseLeave += OnCanvasMouseLeave;
+        DragOver += OnCanvasDragOver;
+        DragLeave += OnCanvasDragLeave;
+        Drop += OnCanvasDrop;
+        PaintSurface += OnPaintSurface;
     }
 
     public event EventHandler<object?>? SelectedItemChanged;
@@ -126,8 +134,8 @@ public sealed class MapCanvas : Control
             _tool = value;
             CancelCellBrush();
             Cursor = value == EditorTool.Select
-                ? new Cursor(StandardCursorType.Arrow)
-                : new Cursor(StandardCursorType.Cross);
+                ? CursorType.Arrow
+                : CursorType.Cross;
             InvalidateVisual();
         }
     }
@@ -139,6 +147,9 @@ public sealed class MapCanvas : Control
     public bool SnapToGrid { get; set; }
     public int CellZBrushValue { get; set; } = 1;
     public string DropTargetLayer { get; set; } = "";
+
+    /// <summary>由主窗口在空格键按下/松开时更新，用于空格 + 左键平移。</summary>
+    public bool IsSpaceDown { get; set; }
 
     public void FitToView()
     {
@@ -186,6 +197,14 @@ public sealed class MapCanvas : Control
         return true;
     }
 
+    public void CancelBrush()
+    {
+        var brushChanged = _brushChanged;
+        CancelCellBrush();
+        if (brushChanged) NotifyDocumentChanged();
+        else InvalidateVisual();
+    }
+
     public TMapSprite? AddResourceAt(TMapResource resource, TMapPoint point)
     {
         var bitmap = LoadBitmap(resource.ImagePath);
@@ -201,8 +220,8 @@ public sealed class MapCanvas : Control
             ImagePath = resource.ImagePath,
             X = point.X,
             Y = point.Y,
-            Width = bitmap.PixelSize.Width,
-            Height = bitmap.PixelSize.Height,
+            Width = bitmap.Width,
+            Height = bitmap.Height,
             Order = Document.Sprites.Count == 0 ? 0 : Document.Sprites.Max(item => item.Order) + 1
         };
         Document.Sprites.Add(sprite);
@@ -211,28 +230,306 @@ public sealed class MapCanvas : Control
         return sprite;
     }
 
-    public override void Render(DrawingContext dc)
+    public void RefreshHoveredCell() =>
+        HoveredCellChanged?.Invoke(this, new MapCellHoverEventArgs(_hoveredRow, _hoveredColumn));
+
+    private void OnPaintSurface(SKCanvas canvas, SKImageInfo info)
     {
-        base.Render(dc);
-        dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(30, 32, 36)), null, new Rect(Bounds.Size));
-        DrawMapBackground(dc);
-        DrawImageLayers(dc);
-        if (ShowCells) DrawCells(dc);
-        if (ShowCellZs) DrawCellZs(dc);
-        DrawObjectLayers(dc);
-        DrawCellBrushPreview(dc);
-        if (ShowGrid) DrawGrid(dc);
-        if (ShowChunks) DrawChunks(dc);
-        DrawSelection(dc);
+        var scale = Bounds.Width > 0 ? (float)(info.Width / Bounds.Width) : 1f;
+        canvas.Clear(new SKColor(30, 32, 36));
+        canvas.Save();
+        canvas.Scale(scale);
+        DrawMapBackground(canvas);
+        DrawImageLayers(canvas);
+        if (ShowCells) DrawCells(canvas);
+        if (ShowCellZs) DrawCellZs(canvas);
+        DrawObjectLayers(canvas);
+        DrawCellBrushPreview(canvas);
+        if (ShowGrid) DrawGrid(canvas);
+        if (ShowChunks) DrawChunks(canvas);
+        DrawSelection(canvas);
+        DrawResourceDropPreview(canvas);
+        canvas.Restore();
     }
 
-    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    private void DrawResourceDropPreview(SKCanvas canvas)
     {
-        ClearBitmapCache();
-        base.OnDetachedFromVisualTree(e);
+        if (_resourceDropPreview is null || _resourceDropPreviewPoint is null) return;
+        var bitmap = LoadBitmap(_resourceDropPreview.ImagePath);
+        if (bitmap is null) return;
+
+        var point = MapToScreen(_resourceDropPreviewPoint);
+        var halfWidth = bitmap.Width * _zoom / 2;
+        var halfHeight = bitmap.Height * _zoom / 2;
+        var rect = new SKRect(
+            (float)(point.X - halfWidth),
+            (float)(point.Y - halfHeight),
+            (float)(point.X + halfWidth),
+            (float)(point.Y + halfHeight));
+        using var previewPaint = new SKPaint { Color = new SKColor(255, 255, 255, 150) };
+        using var outlinePaint = new SKPaint
+        {
+            Color = new SKColor(0, 180, 255, 230),
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = 2,
+            IsAntialias = true
+        };
+        canvas.DrawBitmap(bitmap, rect, previewPaint);
+        canvas.DrawRect(rect, outlinePaint);
+        canvas.DrawCircle((float)point.X, (float)point.Y, 4, outlinePaint);
     }
 
-    protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
+    private void DrawMapBackground(SKCanvas canvas)
+    {
+        var topLeft = MapToScreen(new TMapPoint(-Document.Width / 2, Document.Height / 2));
+        var rect = new SKRect(
+            (float)topLeft.X,
+            (float)topLeft.Y,
+            (float)(topLeft.X + Document.Width * _zoom),
+            (float)(topLeft.Y + Document.Height * _zoom));
+        using var fill = new SKPaint { Color = new SKColor(59, 61, 66), Style = SKPaintStyle.Fill };
+        using var border = new SKPaint { Color = new SKColor(130, 135, 145), Style = SKPaintStyle.Stroke, StrokeWidth = 1 };
+        canvas.DrawRect(rect, fill);
+        canvas.DrawRect(rect, border);
+    }
+
+    private void DrawImageLayers(SKCanvas canvas)
+    {
+        foreach (var layer in Document.Layers
+                     .Where(layer => layer.Visible && layer.Type == TMapLayerType.Image).Reverse())
+        {
+            foreach (var sprite in Document.Sprites.Where(sprite => sprite.Layer == layer.Name)
+                         .OrderBy(sprite => sprite.Order))
+                DrawSprite(canvas, sprite);
+        }
+    }
+
+    private void DrawObjectLayers(SKCanvas canvas)
+    {
+        foreach (var layer in Document.Layers
+                     .Where(layer => layer.Visible && layer.Type == TMapLayerType.Object).Reverse())
+        {
+            foreach (var sprite in Document.Sprites.Where(sprite => sprite.Layer == layer.Name)
+                         .OrderBy(sprite => sprite.Z)
+                         .ThenBy(sprite => sprite.Order))
+                DrawSprite(canvas, sprite);
+            foreach (var mapObject in Document.Objects.Where(mapObject => mapObject.Layer == layer.Name)
+                         .OrderBy(mapObject => mapObject.Z))
+                DrawObject(canvas, mapObject);
+        }
+    }
+
+    private void DrawSprite(SKCanvas canvas, TMapSprite sprite)
+    {
+        var bitmap = LoadBitmap(sprite.ImagePath);
+        if (bitmap is null) return;
+        var center = MapToScreen(new TMapPoint(sprite.X, sprite.Y));
+        canvas.Save();
+        canvas.Translate((float)center.X, (float)center.Y);
+        canvas.RotateDegrees((float)-sprite.Rotation);
+        canvas.Scale((float)(sprite.ScaleX * _zoom), (float)(sprite.ScaleY * _zoom));
+        var rect = new SKRect(
+            (float)(-sprite.AnchorX * sprite.Width),
+            (float)(-(1 - sprite.AnchorY) * sprite.Height),
+            (float)((1 - sprite.AnchorX) * sprite.Width),
+            (float)(sprite.AnchorY * sprite.Height));
+        canvas.DrawBitmap(bitmap, rect);
+        canvas.Restore();
+    }
+
+    private void DrawCells(SKCanvas canvas)
+    {
+        using var fill = new SKPaint { Style = SKPaintStyle.Fill };
+        foreach (var cell in Document.Cells)
+        {
+            var rect = GetCellScreenRect(cell.Row, cell.Column);
+            fill.Color = cell.State == TMapCellState.Walk
+                ? new SKColor(0, 210, 75, 105)
+                : new SKColor(235, 55, 55, 105);
+            canvas.DrawRect(rect, fill);
+        }
+    }
+
+    private void DrawCellZs(SKCanvas canvas)
+    {
+        using var fill = new SKPaint { Style = SKPaintStyle.Fill };
+        using var border = new SKPaint { Color = SKColors.DeepSkyBlue, Style = SKPaintStyle.Stroke, StrokeWidth = 1 };
+        foreach (var cell in Document.CellZs)
+        {
+            var rect = GetCellScreenRect(cell.Row, cell.Column);
+            fill.Color = cell.Z > 0
+                ? new SKColor(30, 150, 255, 75)
+                : new SKColor(180, 80, 230, 75);
+            canvas.DrawRect(rect, fill);
+            canvas.DrawRect(rect, border);
+            if (_zoom * Document.GridSize < 18) continue;
+            var size = (float)Math.Clamp(_zoom * Document.GridSize * 0.4, 10, 18);
+            using var font = new SKFont(UiTypeface, size);
+            using var textPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
+            var text = cell.Z.ToString();
+            var width = font.MeasureText(text);
+            var centerX = (rect.Left + rect.Right) / 2f;
+            var centerY = (rect.Top + rect.Bottom) / 2f;
+            canvas.DrawText(text,
+                centerX - width / 2f,
+                centerY + size * 0.35f,
+                font, textPaint);
+        }
+    }
+
+    private void DrawObject(SKCanvas canvas, TMapObject mapObject)
+    {
+        var point = MapToScreen(new TMapPoint(mapObject.X, mapObject.Y));
+        using var fill = new SKPaint { Color = ParseDisplayColor(mapObject.DisplayColor), Style = SKPaintStyle.Fill };
+        using var outline = new SKPaint
+        {
+            Color = _selectedItems.Contains(mapObject) ? SKColors.Yellow : SKColors.White,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = _selectedItems.Contains(mapObject) ? 2 : 1
+        };
+        var oval = new SKRect((float)(point.X - 6), (float)(point.Y - 6), (float)(point.X + 6), (float)(point.Y + 6));
+        canvas.DrawOval(oval, fill);
+        canvas.DrawOval(oval, outline);
+        using var font = new SKFont(UiTypeface, 12);
+        using var textPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
+        canvas.DrawText(mapObject.Label, (float)(point.X + 8), (float)(point.Y - 17 + 12), font, textPaint);
+    }
+
+    private static SKTypeface CreateUiTypeface()
+    {
+        string[] candidates =
+        [
+            "Microsoft YaHei UI",
+            "Microsoft YaHei",
+            "Segoe UI",
+            "Noto Sans CJK SC",
+            "PingFang SC",
+            "Source Han Sans SC"
+        ];
+        foreach (var family in candidates)
+        {
+            var typeface = SKTypeface.FromFamilyName(family);
+            if (typeface is not null &&
+                !string.Equals(typeface.FamilyName, "sans-serif", StringComparison.OrdinalIgnoreCase))
+            {
+                return typeface;
+            }
+            typeface?.Dispose();
+        }
+
+        return SKTypeface.CreateDefault();
+    }
+
+    private static SKColor ParseDisplayColor(string? value)
+    {
+        try
+        {
+            var color = Color.FromHex(value ?? "#00BFFF");
+            return new SKColor(color.R, color.G, color.B, color.A);
+        }
+        catch (FormatException)
+        {
+            return new SKColor(0, 191, 255);
+        }
+    }
+
+    private void DrawCellBrushPreview(SKCanvas canvas)
+    {
+        if (!_isRectangleBrushing || !_brushStartCell.HasValue || !_brushEndCell.HasValue) return;
+        var points = GetBrushRectanglePoints(_brushStartCell.Value, _brushEndCell.Value);
+        var brush = _activeBrushTool switch
+        {
+            EditorTool.WalkBrush => SKColors.LimeGreen,
+            EditorTool.BlockBrush => SKColors.OrangeRed,
+            EditorTool.CellZBrush => SKColors.DeepSkyBlue,
+            EditorTool.EraseCellZBrush => SKColors.MediumPurple,
+            _ => SKColors.WhiteSmoke,
+        };
+        using var pen = new SKPaint { Color = brush, Style = SKPaintStyle.Stroke, StrokeWidth = 3, IsAntialias = true };
+        using var path = CreateScreenPolygonPath(points.Select(MapToScreen).ToList(), true);
+        canvas.DrawPath(path, pen);
+    }
+
+    private void DrawGrid(SKCanvas canvas)
+    {
+        if (Document.GridSize <= 0 || _zoom * Document.GridSize < 4) return;
+        using var pen = new SKPaint { Color = new SKColor(255, 255, 255, 75), Style = SKPaintStyle.Stroke, StrokeWidth = 1 };
+        var minX = -Document.Width / 2;
+        var minY = -Document.Height / 2;
+        var columns = (int)Math.Ceiling(Document.Width / Document.GridSize);
+        var rows = (int)Math.Ceiling(Document.Height / Document.GridSize);
+        for (var col = 0; col <= columns; col++)
+        {
+            var x = Math.Min(Document.Width / 2, minX + col * Document.GridSize);
+            DrawLine(canvas, pen, MapToScreen(new TMapPoint(x, minY)), MapToScreen(new TMapPoint(x, Document.Height / 2)));
+        }
+        for (var row = 0; row <= rows; row++)
+        {
+            var y = Math.Min(Document.Height / 2, minY + row * Document.GridSize);
+            DrawLine(canvas, pen, MapToScreen(new TMapPoint(minX, y)), MapToScreen(new TMapPoint(Document.Width / 2, y)));
+        }
+    }
+
+    private void DrawChunks(SKCanvas canvas)
+    {
+        if (Document.ChunkColumns <= 0 || Document.ChunkRows <= 0) return;
+        using var pen = new SKPaint { Color = SKColors.Gold, Style = SKPaintStyle.Stroke, StrokeWidth = 2 };
+        var minX = -Document.Width / 2;
+        var minY = -Document.Height / 2;
+        for (var col = 0; col <= Document.ChunkColumns; col++)
+        {
+            var x = minX + col * Document.Width / Document.ChunkColumns;
+            DrawLine(canvas, pen, MapToScreen(new TMapPoint(x, minY)), MapToScreen(new TMapPoint(x, Document.Height / 2)));
+        }
+        for (var row = 0; row <= Document.ChunkRows; row++)
+        {
+            var y = minY + row * Document.Height / Document.ChunkRows;
+            DrawLine(canvas, pen, MapToScreen(new TMapPoint(minX, y)), MapToScreen(new TMapPoint(Document.Width / 2, y)));
+        }
+    }
+
+    private void DrawSelection(SKCanvas canvas)
+    {
+        using var pen = new SKPaint { Color = SKColors.Cyan, Style = SKPaintStyle.Stroke, StrokeWidth = 2, IsAntialias = true };
+        foreach (var sprite in _selectedItems.OfType<TMapSprite>())
+        {
+            var corners = GetSpriteCorners(sprite).Select(MapToScreen).ToList();
+            using var geometry = CreateScreenPolygonPath(corners, true);
+            canvas.DrawPath(geometry, pen);
+            DrawResizeHandles(canvas, corners);
+        }
+    }
+
+    private void DrawResizeHandles(SKCanvas canvas, IReadOnlyList<Point> corners)
+    {
+        if (corners.Count != 4) return;
+        var handles = new[]
+        {
+            corners[0],
+            corners[1],
+            corners[2],
+            corners[3],
+            Midpoint(corners[0], corners[1]),
+            Midpoint(corners[1], corners[2]),
+            Midpoint(corners[2], corners[3]),
+            Midpoint(corners[3], corners[0])
+        };
+        using var fill = new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Fill };
+        using var outline = new SKPaint { Color = SKColors.Cyan, Style = SKPaintStyle.Stroke, StrokeWidth = 1 };
+        foreach (var point in handles)
+        {
+            var rect = new SKRect((float)(point.X - 4), (float)(point.Y - 4), (float)(point.X + 4), (float)(point.Y + 4));
+            canvas.DrawRect(rect, fill);
+            canvas.DrawRect(rect, outline);
+        }
+    }
+
+    private static void DrawLine(SKCanvas canvas, SKPaint paint, Point start, Point end)
+    {
+        canvas.DrawLine((float)start.X, (float)start.Y, (float)end.X, (float)end.Y, paint);
+    }
+
+    private void OnCanvasMouseWheel(MouseWheelEventArgs e)
     {
         var before = ScreenToMap(e.GetPosition(this));
         _zoom = Math.Clamp(_zoom * (e.Delta.Y > 0 ? 1.15 : 1 / 1.15), 0.02, 8);
@@ -242,28 +539,25 @@ public sealed class MapCanvas : Control
         e.Handled = true;
     }
 
-    protected override void OnPointerPressed(PointerPressedEventArgs e)
+    private void OnCanvasMouseDown(MouseEventArgs e)
     {
         Focus();
         _lastScreenPoint = e.GetPosition(this);
-        var properties = e.GetCurrentPoint(this).Properties;
-        var updateKind = properties.PointerUpdateKind;
-        _lastKeyModifiers = e.KeyModifiers;
-        if (updateKind == PointerUpdateKind.MiddleButtonPressed ||
-            (updateKind == PointerUpdateKind.LeftButtonPressed && _isSpaceDown))
+        var window = FindVisualRoot() as Window;
+        if (e.MiddleButton || (e.LeftButton && IsSpaceDown))
         {
             _isPanning = true;
-            e.Pointer.Capture(this);
-            Cursor = new Cursor(StandardCursorType.Hand);
+            window?.CaptureMouse(this);
+            Cursor = CursorType.Hand;
             e.Handled = true;
             return;
         }
 
-        if (updateKind == PointerUpdateKind.RightButtonPressed)
+        if (e.RightButton)
         {
             if (IsCellBrushTool())
             {
-                e.Pointer.Capture(this);
+                window?.CaptureMouse(this);
                 BeginRectangleCellBrush(ScreenToMap(_lastScreenPoint));
                 e.Handled = true;
                 return;
@@ -274,14 +568,14 @@ public sealed class MapCanvas : Control
             if (hit is not null)
             {
                 if (!_selectedItems.Contains(hit)) SelectedItem = hit;
-                _elementContextMenu.Open(this);
+                _elementContextMenu.ShowAt(this, _lastScreenPoint);
                 e.Handled = true;
             }
             return;
         }
 
-        if (updateKind != PointerUpdateKind.LeftButtonPressed) return;
-        e.Pointer.Capture(this);
+        if (!e.LeftButton) return;
+        window?.CaptureMouse(this);
         var mapPoint = ScreenToMap(_lastScreenPoint);
         switch (Tool)
         {
@@ -293,16 +587,15 @@ public sealed class MapCanvas : Control
                 BeginContinuousCellBrush(mapPoint);
                 break;
             default:
-                BeginSelectionOrDrag(mapPoint, _lastScreenPoint);
+                BeginSelectionOrDrag(mapPoint, _lastScreenPoint, e.Modifiers.HasFlag(ModifierKeys.Control));
                 break;
         }
         e.Handled = true;
     }
 
-    protected override void OnPointerMoved(PointerEventArgs e)
+    private void OnCanvasMouseMove(MouseEventArgs e)
     {
         var screenPoint = e.GetPosition(this);
-        var properties = e.GetCurrentPoint(this).Properties;
         if (!_isPanning && !_isDragging && !_isResizing)
             UpdateHoveredCell(screenPoint);
         if (_isPanning)
@@ -313,7 +606,7 @@ public sealed class MapCanvas : Control
             return;
         }
 
-        if (_isContinuousBrushing && properties.IsLeftButtonPressed)
+        if (_isContinuousBrushing && e.LeftButton)
         {
             var cell = GetMapCell(ScreenToMap(screenPoint));
             if (cell.HasValue && cell != _brushEndCell)
@@ -325,7 +618,7 @@ public sealed class MapCanvas : Control
             return;
         }
 
-        if (_isRectangleBrushing && properties.IsRightButtonPressed)
+        if (_isRectangleBrushing && e.RightButton)
         {
             var cell = GetMapCell(ScreenToMap(screenPoint));
             if (cell.HasValue && cell != _brushEndCell)
@@ -336,7 +629,7 @@ public sealed class MapCanvas : Control
             return;
         }
 
-        if (_isResizing && _resizeSprite is not null && properties.IsLeftButtonPressed)
+        if (_isResizing && _resizeSprite is not null && e.LeftButton)
         {
             if (ResizeSelectedSprite(ScreenToMap(screenPoint)))
             {
@@ -346,7 +639,7 @@ public sealed class MapCanvas : Control
             return;
         }
 
-        if (!_isDragging || !properties.IsLeftButtonPressed || _dragStartMapPoint is null) return;
+        if (!_isDragging || !e.LeftButton || _dragStartMapPoint is null) return;
         var dx = (screenPoint.X - _dragStartScreenPoint.X) / _zoom;
         var dy = -(screenPoint.Y - _dragStartScreenPoint.Y) / _zoom;
         var changed = false;
@@ -364,58 +657,80 @@ public sealed class MapCanvas : Control
         InvalidateVisual();
     }
 
-    protected override void OnPointerExited(PointerEventArgs e)
+    private void OnCanvasMouseLeave()
     {
         SetHoveredCell(null, null);
-        base.OnPointerExited(e);
     }
 
-    private void OnCanvasDragOver(object? sender, DragEventArgs e)
+    private void OnCanvasDragOver(DragEventArgs e)
     {
-        if (e.DataTransfer.Contains(TMapDragFormats.Resource) &&
+        if (e.Data.TryGetData<TMapResource>(TMapDragFormats.Resource, out var resource) &&
             Document.Layers.Any(layer => layer.Name == DropTargetLayer) &&
-            IsInsideMap(ScreenToMap(e.GetPosition(this))))
+            IsInsideMap(ScreenToMap(PointFromScreen(e.ScreenPosition))))
         {
-            e.DragEffects = DragDropEffects.Copy;
+            _resourceDropPreview = resource;
+            _resourceDropPreviewPoint = Snap(ScreenToMap(PointFromScreen(e.ScreenPosition)));
+            InvalidateVisual();
+            e.Effect = DragDropEffects.Copy;
+            e.Accepted = true;
         }
         else
         {
-            e.DragEffects = DragDropEffects.None;
+            ClearResourceDropPreview();
+            e.Effect = DragDropEffects.None;
+            e.Accepted = false;
         }
         e.Handled = true;
     }
 
-    private void OnCanvasDrop(object? sender, DragEventArgs e)
+    private void OnCanvasDragLeave(DragEventArgs e)
     {
-        if (e.DataTransfer.TryGetValue(TMapDragFormats.Resource) is not TMapResource resource)
+        ClearResourceDropPreview();
+        e.Handled = true;
+    }
+
+    private void OnCanvasDrop(DragEventArgs e)
+    {
+        ClearResourceDropPreview();
+        if (!e.Data.TryGetData<TMapResource>(TMapDragFormats.Resource, out var resource))
         {
-            e.DragEffects = DragDropEffects.None;
+            e.Effect = DragDropEffects.None;
+            e.Accepted = false;
             e.Handled = true;
             return;
         }
 
-        var point = ScreenToMap(e.GetPosition(this));
-        e.DragEffects = AddResourceAt(resource, point) is null
+        var point = ScreenToMap(PointFromScreen(e.ScreenPosition));
+        e.Effect = AddResourceAt(resource, point) is null
             ? DragDropEffects.None
             : DragDropEffects.Copy;
+        e.Accepted = e.Effect == DragDropEffects.Copy;
         e.Handled = true;
     }
 
-    protected override void OnPointerReleased(PointerReleasedEventArgs e)
+    private void ClearResourceDropPreview()
     {
-        var updateKind = e.GetCurrentPoint(this).Properties.PointerUpdateKind;
-        if (updateKind == PointerUpdateKind.LeftButtonReleased && _isContinuousBrushing)
+        if (_resourceDropPreview is null && _resourceDropPreviewPoint is null) return;
+        _resourceDropPreview = null;
+        _resourceDropPreviewPoint = null;
+        InvalidateVisual();
+    }
+
+    private void OnCanvasMouseUp(MouseEventArgs e)
+    {
+        var window = FindVisualRoot() as Window;
+        if (e.Button == MouseButton.Left && _isContinuousBrushing)
         {
             CancelCellBrush();
-            e.Pointer.Capture(null);
+            window?.ReleaseMouseCapture();
             NotifyDocumentChanged();
             e.Handled = true;
             return;
         }
-        if (updateKind == PointerUpdateKind.RightButtonReleased && _isRectangleBrushing)
+        if (e.Button == MouseButton.Right && _isRectangleBrushing)
         {
             CommitRectangleCellBrush();
-            e.Pointer.Capture(null);
+            window?.ReleaseMouseCapture();
             e.Handled = true;
             return;
         }
@@ -428,213 +743,12 @@ public sealed class MapCanvas : Control
             _activePointerEditChanged = false;
             _resizeSprite = null;
             _resizeHandle = ResizeHandle.None;
-            e.Pointer.Capture(null);
+            window?.ReleaseMouseCapture();
             Cursor = Tool == EditorTool.Select
-                ? new Cursor(StandardCursorType.Arrow)
-                : new Cursor(StandardCursorType.Cross);
+                ? CursorType.Arrow
+                : CursorType.Cross;
             if (shouldNotifyDocumentChanged) NotifyDocumentChanged();
             else InvalidateVisual();
-        }
-        base.OnPointerReleased(e);
-    }
-
-    protected override void OnKeyDown(KeyEventArgs e)
-    {
-        if (e.Key == Key.Space)
-        {
-            _isSpaceDown = true;
-            e.Handled = true;
-        }
-        else if (e.Key == Key.Delete)
-        {
-            DeleteSelected();
-            e.Handled = true;
-        }
-        else if (e.Key == Key.Escape)
-        {
-            var brushChanged = _brushChanged;
-            CancelCellBrush();
-            if (brushChanged) NotifyDocumentChanged();
-            else InvalidateVisual();
-            e.Handled = true;
-        }
-        base.OnKeyDown(e);
-    }
-
-    protected override void OnKeyUp(KeyEventArgs e)
-    {
-        if (e.Key == Key.Space)
-        {
-            _isSpaceDown = false;
-            e.Handled = true;
-        }
-        base.OnKeyUp(e);
-    }
-
-    private void DrawMapBackground(DrawingContext dc)
-    {
-        var topLeft = MapToScreen(new TMapPoint(-Document.Width / 2, Document.Height / 2));
-        var rect = new Rect(topLeft.X, topLeft.Y, Document.Width * _zoom, Document.Height * _zoom);
-        dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(59, 61, 66)),
-            new Pen(new SolidColorBrush(Color.FromRgb(130, 135, 145)), 1), rect);
-    }
-
-    private void DrawImageLayers(DrawingContext dc)
-    {
-        foreach (var layer in Document.Layers
-                     .Where(layer => layer.Visible && layer.Type == TMapLayerType.Image).Reverse())
-        {
-            foreach (var sprite in Document.Sprites.Where(sprite => sprite.Layer == layer.Name)
-                         .OrderBy(sprite => sprite.Order))
-                DrawSprite(dc, sprite);
-        }
-    }
-
-    private void DrawObjectLayers(DrawingContext dc)
-    {
-        foreach (var layer in Document.Layers
-                     .Where(layer => layer.Visible && layer.Type == TMapLayerType.Object).Reverse())
-        {
-            foreach (var sprite in Document.Sprites.Where(sprite => sprite.Layer == layer.Name)
-                         .OrderBy(sprite => sprite.Z)
-                         .ThenBy(sprite => sprite.Order))
-                DrawSprite(dc, sprite);
-            foreach (var mapObject in Document.Objects.Where(mapObject => mapObject.Layer == layer.Name)
-                         .OrderBy(mapObject => mapObject.Z))
-                DrawObject(dc, mapObject);
-        }
-    }
-
-    private void DrawSprite(DrawingContext dc, TMapSprite sprite)
-    {
-        var bitmap = LoadBitmap(sprite.ImagePath);
-        if (bitmap is null) return;
-        var center = MapToScreen(new TMapPoint(sprite.X, sprite.Y));
-        using (dc.PushTransform(Matrix.CreateTranslation(center.X, center.Y)))
-        using (dc.PushTransform(Matrix.CreateRotation(-sprite.Rotation * Math.PI / 180)))
-        using (dc.PushTransform(Matrix.CreateScale(sprite.ScaleX * _zoom, sprite.ScaleY * _zoom)))
-        {
-            var rect = new Rect(
-                -sprite.AnchorX * sprite.Width,
-                -(1 - sprite.AnchorY) * sprite.Height,
-                sprite.Width,
-                sprite.Height);
-            dc.DrawImage(bitmap, rect);
-        }
-    }
-
-    private void DrawCells(DrawingContext dc)
-    {
-        foreach (var cell in Document.Cells)
-        {
-            var rect = GetCellScreenRect(cell.Row, cell.Column);
-            var fill = new SolidColorBrush(cell.State == TMapCellState.Walk
-                ? Color.FromArgb(105, 0, 210, 75)
-                : Color.FromArgb(105, 235, 55, 55));
-            dc.DrawRectangle(fill, null, rect);
-        }
-    }
-
-    private void DrawCellZs(DrawingContext dc)
-    {
-        foreach (var cell in Document.CellZs)
-        {
-            var rect = GetCellScreenRect(cell.Row, cell.Column);
-            var color = cell.Z > 0
-                ? Color.FromArgb(75, 30, 150, 255)
-                : Color.FromArgb(75, 180, 80, 230);
-            dc.DrawRectangle(new SolidColorBrush(color), new Pen(Brushes.DeepSkyBlue, 1), rect);
-            if (_zoom * Document.GridSize < 18) continue;
-            var text = CreateText(cell.Z.ToString(), Math.Clamp(_zoom * Document.GridSize * 0.4, 10, 18));
-            dc.DrawText(text, new Point(
-                rect.Center.X - text.Width / 2,
-                rect.Center.Y - text.Height / 2));
-        }
-    }
-
-    private void DrawObject(DrawingContext dc, TMapObject mapObject)
-    {
-        var point = MapToScreen(new TMapPoint(mapObject.X, mapObject.Y));
-        var brush = new SolidColorBrush(ParseDisplayColor(mapObject.DisplayColor));
-        var outline = _selectedItems.Contains(mapObject) ? Brushes.Yellow : Brushes.White;
-        dc.DrawEllipse(brush, new Pen(outline, _selectedItems.Contains(mapObject) ? 2 : 1), point, 6, 6);
-        dc.DrawText(CreateText(mapObject.Label, 12), new Point(point.X + 8, point.Y - 17));
-    }
-
-    private static Color ParseDisplayColor(string? value)
-    {
-        try
-        {
-            return Color.Parse(value ?? "#00BFFF");
-        }
-        catch (FormatException)
-        {
-            return Color.FromRgb(0, 191, 255);
-        }
-    }
-
-    private void DrawCellBrushPreview(DrawingContext dc)
-    {
-        if (!_isRectangleBrushing || !_brushStartCell.HasValue || !_brushEndCell.HasValue) return;
-        var points = GetBrushRectanglePoints(_brushStartCell.Value, _brushEndCell.Value);
-        var brush = _activeBrushTool switch
-        {
-            EditorTool.WalkBrush => Brushes.LimeGreen,
-            EditorTool.BlockBrush => Brushes.OrangeRed,
-            EditorTool.CellZBrush => Brushes.DeepSkyBlue,
-            EditorTool.EraseCellZBrush => Brushes.MediumPurple,
-            _ => Brushes.WhiteSmoke,
-        };
-        var pen = new Pen(brush, 3);
-        dc.DrawGeometry(null, pen, CreatePolygonGeometry(points, true));
-    }
-
-    private void DrawGrid(DrawingContext dc)
-    {
-        if (Document.GridSize <= 0 || _zoom * Document.GridSize < 4) return;
-        var pen = new Pen(new SolidColorBrush(Color.FromArgb(75, 255, 255, 255)), 1);
-        var minX = -Document.Width / 2;
-        var minY = -Document.Height / 2;
-        var columns = (int)Math.Ceiling(Document.Width / Document.GridSize);
-        var rows = (int)Math.Ceiling(Document.Height / Document.GridSize);
-        for (var col = 0; col <= columns; col++)
-        {
-            var x = Math.Min(Document.Width / 2, minX + col * Document.GridSize);
-            dc.DrawLine(pen, MapToScreen(new TMapPoint(x, minY)), MapToScreen(new TMapPoint(x, Document.Height / 2)));
-        }
-        for (var row = 0; row <= rows; row++)
-        {
-            var y = Math.Min(Document.Height / 2, minY + row * Document.GridSize);
-            dc.DrawLine(pen, MapToScreen(new TMapPoint(minX, y)), MapToScreen(new TMapPoint(Document.Width / 2, y)));
-        }
-    }
-
-    private void DrawChunks(DrawingContext dc)
-    {
-        if (Document.ChunkColumns <= 0 || Document.ChunkRows <= 0) return;
-        var pen = new Pen(Brushes.Gold, 2);
-        var minX = -Document.Width / 2;
-        var minY = -Document.Height / 2;
-        for (var col = 0; col <= Document.ChunkColumns; col++)
-        {
-            var x = minX + col * Document.Width / Document.ChunkColumns;
-            dc.DrawLine(pen, MapToScreen(new TMapPoint(x, minY)), MapToScreen(new TMapPoint(x, Document.Height / 2)));
-        }
-        for (var row = 0; row <= Document.ChunkRows; row++)
-        {
-            var y = minY + row * Document.Height / Document.ChunkRows;
-            dc.DrawLine(pen, MapToScreen(new TMapPoint(minX, y)), MapToScreen(new TMapPoint(Document.Width / 2, y)));
-        }
-    }
-
-    private void DrawSelection(DrawingContext dc)
-    {
-        foreach (var sprite in _selectedItems.OfType<TMapSprite>())
-        {
-            var corners = GetSpriteCorners(sprite).Select(MapToScreen).ToList();
-            var geometry = CreateScreenPolygonGeometry(corners, true);
-            dc.DrawGeometry(null, new Pen(Brushes.Cyan, 2), geometry);
-            DrawResizeHandles(dc, corners);
         }
     }
 
@@ -800,7 +914,7 @@ public sealed class MapCanvas : Control
         ];
     }
 
-    private Rect GetCellScreenRect(int row, int column)
+    private SKRect GetCellScreenRect(int row, int column)
     {
         var originX = -Document.Width / 2;
         var originY = -Document.Height / 2;
@@ -809,7 +923,11 @@ public sealed class MapCanvas : Control
         var bottom = originY + row * Document.GridSize;
         var top = Math.Min(Document.Height / 2, bottom + Document.GridSize);
         var topLeft = MapToScreen(new TMapPoint(left, top));
-        return new Rect(topLeft.X, topLeft.Y, (right - left) * _zoom, (top - bottom) * _zoom);
+        return new SKRect(
+            (float)topLeft.X,
+            (float)topLeft.Y,
+            (float)(topLeft.X + (right - left) * _zoom),
+            (float)(topLeft.Y + (top - bottom) * _zoom));
     }
 
     private void AddObject(TMapPoint point)
@@ -832,9 +950,8 @@ public sealed class MapCanvas : Control
         NotifyDocumentChanged();
     }
 
-    private void BeginSelectionOrDrag(TMapPoint mapPoint, Point screenPoint)
+    private void BeginSelectionOrDrag(TMapPoint mapPoint, Point screenPoint, bool extendSelection)
     {
-        var extendSelection = _lastKeyModifiers.HasFlag(KeyModifiers.Control);
         if (!extendSelection && SelectedItem is TMapSprite { IsLocked: false } selectedSprite)
         {
             var resizeHandle = HitTestResizeHandle(selectedSprite, screenPoint);
@@ -938,23 +1055,17 @@ public sealed class MapCanvas : Control
                y >= -sprite.AnchorY * sprite.Height && y <= (1 - sprite.AnchorY) * sprite.Height;
     }
 
-    private StreamGeometry CreatePolygonGeometry(IReadOnlyList<TMapPoint> points, bool close)
+    private static SKPath CreateScreenPolygonPath(IReadOnlyList<Point> points, bool close)
     {
-        return CreateScreenPolygonGeometry(points.Select(MapToScreen).ToList(), close);
-    }
-
-    private static StreamGeometry CreateScreenPolygonGeometry(IReadOnlyList<Point> points, bool close)
-    {
-        var geometry = new StreamGeometry();
-        if (points.Count == 0) return geometry;
-        using var context = geometry.Open();
-        context.BeginFigure(points[0], close);
+        var path = new SKPath();
+        if (points.Count == 0) return path;
+        path.MoveTo((float)points[0].X, (float)points[0].Y);
         foreach (var point in points.Skip(1))
         {
-            context.LineTo(point);
+            path.LineTo((float)point.X, (float)point.Y);
         }
-        if (close) context.EndFigure(true);
-        return geometry;
+        if (close) path.Close();
+        return path;
     }
 
     private IEnumerable<TMapPoint> GetSpriteCorners(TMapSprite sprite)
@@ -974,27 +1085,6 @@ public sealed class MapCanvas : Control
             var x = point.X * sprite.ScaleX;
             var y = point.Y * sprite.ScaleY;
             yield return new TMapPoint(sprite.X + cos * x - sin * y, sprite.Y + sin * x + cos * y);
-        }
-    }
-
-    private void DrawResizeHandles(DrawingContext dc, IReadOnlyList<Point> corners)
-    {
-        if (corners.Count != 4) return;
-        var handles = new[]
-        {
-            corners[0],
-            corners[1],
-            corners[2],
-            corners[3],
-            Midpoint(corners[0], corners[1]),
-            Midpoint(corners[1], corners[2]),
-            Midpoint(corners[2], corners[3]),
-            Midpoint(corners[3], corners[0])
-        };
-        foreach (var point in handles)
-        {
-            dc.DrawRectangle(Brushes.White, new Pen(Brushes.Cyan, 1),
-                new Rect(point.X - 4, point.Y - 4, 8, 8));
         }
     }
 
@@ -1187,14 +1277,14 @@ public sealed class MapCanvas : Control
         return new TMapPoint(cos * x - sin * y, sin * x + cos * y);
     }
 
-    private Bitmap? LoadBitmap(string imagePath)
+    private SKBitmap? LoadBitmap(string imagePath)
     {
         try
         {
             var fullPath = TMapFileService.ResolveImagePath(Document, imagePath);
             if (_bitmapCache.TryGetValue(fullPath, out var cached)) return cached;
             if (!File.Exists(fullPath)) return null;
-            var bitmap = new Bitmap(fullPath);
+            var bitmap = SKBitmap.Decode(fullPath);
             _bitmapCache[fullPath] = bitmap;
             return bitmap;
         }
@@ -1255,9 +1345,6 @@ public sealed class MapCanvas : Control
         HoveredCellChanged?.Invoke(this, new MapCellHoverEventArgs(row, column));
     }
 
-    public void RefreshHoveredCell() =>
-        HoveredCellChanged?.Invoke(this, new MapCellHoverEventArgs(_hoveredRow, _hoveredColumn));
-
     private TMapPoint Snap(TMapPoint point)
     {
         if (!SnapToGrid || Document.GridSize <= 0) return point;
@@ -1306,12 +1393,6 @@ public sealed class MapCanvas : Control
         _selectedItem = primaryItem;
         SelectedItemChanged?.Invoke(this, primaryItem);
         InvalidateVisual();
-    }
-
-    private static FormattedText CreateText(string text, double size)
-    {
-        return new FormattedText(text, System.Globalization.CultureInfo.CurrentCulture,
-            FlowDirection.LeftToRight, new Typeface("Segoe UI"), size, Brushes.White);
     }
 
     private void NotifyDocumentChanged()

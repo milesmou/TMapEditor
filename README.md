@@ -1,6 +1,6 @@
 # TMap Editor
 
-基于 .NET 10 + Avalonia 12 的独立跨平台地图编辑器，编辑源文件使用可读 JSON 格式 `.tmap`，烘焙结果兼容现有游戏地图加载结构。
+基于 .NET 10 + MewUI 的独立跨平台地图编辑器，编辑源文件使用可读 JSON 格式 `.tmap`，烘焙结果兼容现有游戏地图加载结构。
 
 格式定义见 [TMAP_FORMAT.md](TMAP_FORMAT.md)。
 
@@ -38,7 +38,7 @@ dotnet run --project .\TMapEditor.csproj
 - 网格、Chunk、路点、格子 Z 和吸附网格的显示设置随工程保存并在打开时恢复
 - 导出 `chunk_row_col.png`、包含层级数据的 `Grid.json` 和独立路点文件 `GridPath.json`
 - 导出前校验全部图片引用，并清理本工具上次生成、当前已失效的 Chunk 和图层产物
-- Windows 界面固定使用 Direct3D 11（ANGLE），macOS 使用 Metal；窗口标题会显示当前界面渲染后端
+- Windows 界面使用 Direct2D 后端，画布经 SkiaSharp GPU 零拷贝渲染；窗口标题会显示当前渲染后端与 Skia 路径
 - 烘焙导出优先使用 GPU，GPU 不可用或 Chunk 超出 GPU 纹理限制时自动回退到 CPU
 
 ## 操作
